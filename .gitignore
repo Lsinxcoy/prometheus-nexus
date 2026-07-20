@@ -53,4 +53,6 @@ verify_codefix.log
 /api_server.log
 /*.csv
 /nul
+/archive/*.tmp
+*.tmp
 

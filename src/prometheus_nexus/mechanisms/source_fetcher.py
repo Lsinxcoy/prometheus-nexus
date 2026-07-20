@@ -97,3 +97,29 @@ def fetch_repo_overview(repo_full_name: str, max_chars: int = 15000) -> str:
             pass
     overview = f"# {repo_full_name}\n\n## README\n{readme}\n\n## Top-level files\n{', '.join(files[:30])}\n"
     return overview[:max_chars]
+
+
+def fetch_repo_source(repo_full_name: str, filenames: list[str], max_chars: int = 20000) -> str:
+    """拉取 repo 指定 .py 源文件内容, 供 AST 提取真实参数/类(Phase 2 学习步).
+
+    仅取文本源码, 不执行外部代码(安全边界). 失败的文件静默跳过.
+    """
+    chunks = []
+    total = 0
+    for fn in filenames[:8]:  # 限前 8 个文件, 避免超大 repo
+        if not fn.endswith(".py"):
+            continue
+        raw = _http_get(
+            f"https://raw.githubusercontent.com/{repo_full_name}/main/{fn}"
+        ) or _http_get(
+            f"https://raw.githubusercontent.com/{repo_full_name}/master/{fn}"
+        )
+        if not raw:
+            continue
+        if total + len(raw) > max_chars:
+            raw = raw[: max(0, max_chars - total)]
+        chunks.append(f"# === {fn} ===\n{raw}")
+        total += len(raw)
+        if total >= max_chars:
+            break
+    return "\n\n".join(chunks)

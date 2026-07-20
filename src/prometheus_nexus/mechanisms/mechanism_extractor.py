@@ -1,34 +1,43 @@
 """MechanismExtractor — T3 第三轨: 从成熟 GitHub 项目提取优势机制。
 
-流程:
-1. SourceFetcher 拉 repo README + 文件树
-2. LLM(复用 Hermes 对话模型, HTTP桥)抽机制签名: 做了什么/接口/依赖
-   无 LLM 时降级为规则提取(识别 class/def/@decorator 模式)
-3. 包装为 ExtractedMechanism(BaseMechanism) 实例
-4. 注册进 MechanismRegistry(category='extracted') —— 存 registry + A-B 并行, 不自动直替
+设计初衷(用户): 基于 learn 管道抓取的 GitHub 项目, 提取高价值机制(含学习 + 编译双步).
 
-安全: 仅提取描述与契约, 不执行外部代码; 激活由验证门 + S7 调度决定。
+Phase 2 升级:
+- Step1 学习: AST 解析 repo 源码真实参数/类(非脆弱正则), LLM 总结机制意图
+- Step2 编译: 理解的机制 -> MechanismCompiler 编译成 BaseMechanism 子类(复用 T4 管线)
+- 高价值过滤: 仅提取与系统相关/有可调参数的 repo
+- 强类型产出: gene_specs (param:(lo,hi)) 或 mechanism_draft, 不再混文本
+
+安全: 仅提取描述/契约/编译, 不执行外部代码; 激活由验证门 + S7 调度决定。
 """
 from __future__ import annotations
 
+import ast
 import logging
 import re
 
 from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism
-from prometheus_nexus.mechanisms.source_fetcher import fetch_repo_overview
+from prometheus_nexus.mechanisms.source_fetcher import fetch_repo_overview, fetch_repo_source
 
 logger = logging.getLogger(__name__)
 
 
 class ExtractedMechanism(BaseMechanism):
-    """T3 提取出的机制(来自外部 repo), 作为候选进入 registry。"""
+    """T3 提取出的机制(来自外部 repo), 作为候选进入 registry。
 
-    def __init__(self, name: str, description: str, repo: str, contract: str = ""):
+    Phase 2: 强类型字段, 不再把文本当 gene_specs 注入(修 'items' bug)。
+    """
+
+    def __init__(self, name: str, description: str, repo: str,
+                 contract: str = "", gene_specs: dict | None = None,
+                 mechanism_summary: str = ""):
         super().__init__()
         self.name = name
         self.description = description
         self.repo = repo
         self.contract = contract
+        self.gene_specs = gene_specs or {}
+        self.mechanism_summary = mechanism_summary
         self.category = "extracted"
 
     def run(self, context: dict | None = None) -> dict:
@@ -41,16 +50,64 @@ class ExtractedMechanism(BaseMechanism):
             "mechanism": self.name,
             "source_repo": self.repo,
             "contract": self.contract,
+            "gene_specs": self.gene_specs,
             "note": "extracted mechanism (candidate, not auto-activated)",
         }
 
 
-class MechanismExtractor:
-    """从 GitHub repo 提取机制。"""
+def extract_gene_specs_from_source(source: str) -> dict[str, tuple[float, float]]:
+    """AST 提取源码中可调参数的真实值域(替代脆弱正则).
 
-    def __init__(self, llm=None, store=None):
+    从模块级常量赋值 / 类属性默认值中抽取数值配置, 派生 (lo, hi) 搜索区间。
+    """
+    specs: dict[str, tuple[float, float]] = {}
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return specs
+    for node in ast.walk(tree):
+        # 模块级 / 类属性: NAME = <数值>
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and isinstance(node.value, ast.Constant) \
+                        and isinstance(node.value.value, (int, float)):
+                    v = float(node.value.value)
+                    specs[f"ext_{t.id}"] = (round(max(0.0, v * 0.5), 4),
+                                            round(max(v * 1.5, 0.01), 4))
+        # 函数默认参数: def f(x: float = 0.3)
+        # Python 3.11: 默认值在 node.args.defaults (位置参数) / kw_defaults (关键字),
+        # 与 args 列表尾部对齐, 无默认值的参数对应 None 占位.
+        if isinstance(node, ast.FunctionDef):
+            pos_args = node.args.args
+            defaults = list(node.args.defaults)
+            # 对齐: defaults 对应 pos_args 末尾 len(defaults) 个
+            offset = len(pos_args) - len(defaults)
+            for i, a in enumerate(pos_args):
+                if a.arg in ("self", "cls"):
+                    continue
+                di = i - offset
+                if di >= 0 and isinstance(defaults[di], ast.Constant) \
+                        and isinstance(defaults[di].value, (int, float)):
+                    v = float(defaults[di].value)
+                    specs[f"ext_{a.arg}"] = (round(max(0.0, v * 0.5), 4),
+                                             round(max(v * 1.5, 0.01), 4))
+    return specs
+
+
+class MechanismExtractor:
+    """从 GitHub repo 提取机制(学习 + 编译双步)."""
+
+    # 与系统语义相关的高价值关键词(用于价值过滤)
+    RELEVANCE_KEYWORDS = (
+        "agent", "memory", "evolution", "mechanism", "reasoning", "policy",
+        "optimizer", "attention", "retrieval", "embedding", "rl", "llm",
+        "neural", "plasticity", "meta-learning", "self-impro",
+    )
+
+    def __init__(self, llm=None, store=None, compiler=None):
         self.llm = llm
         self._store = store
+        self._compiler = compiler  # 复用 T4 的 MechanismCompiler(可选, 延迟构造)
 
     def extract(self, repo_full_name: str) -> ExtractedMechanism | None:
         overview = fetch_repo_overview(repo_full_name)
@@ -61,28 +118,34 @@ class MechanismExtractor:
         mechanism_name = repo_full_name.split("/")[-1]
         description = ""
         contract = ""
+        gene_specs: dict[str, tuple[float, float]] = {}
 
-        # 优先 LLM 抽取
+        # ---- Step1 学习: 取源码做 AST 提取真实参数 ----
+        files = self._parse_file_list(overview)
+        py_files = [f for f in files if f.endswith(".py")][:8]
+        if py_files:
+            source = fetch_repo_source(repo_full_name, py_files)
+            if source:
+                gene_specs = extract_gene_specs_from_source(source)
+
+        # ---- Step1 学习: LLM 总结机制意图(语义理解, 不产结构) ----
         if self.llm is not None and self.llm.available:
             prompt = (
                 f"从以下开源项目概览中提取其'核心机制/算法'(而非功能列表):\n"
                 f"{overview[:6000]}\n\n"
                 f"输出格式:\nMECHANISM: <机制名>\n"
                 f"WHAT: <一句话说明它做什么>\n"
-                f"CONTRACT: <输入/输出/依赖接口>"
+                f"CONTRACT: <输入/输出/依赖接口>\n"
+                f"RELEVANCE: <与 AI Agent/记忆/进化系统的相关度 0-1>"
             )
             out = self.llm.complete(prompt, system="你是机制提取器, 只输出机制签名")
             if out:
                 description = out
                 contract = out
-
-        # 降级: 规则提取(识别代码结构模式)
-        if not description:
+        else:
             classes = re.findall(r"class\s+(\w+)", overview)
             defs = re.findall(r"def\s+(\w+)", overview)
-            description = (
-                f"从 {repo_full_name} 提取: 类={classes[:5]}, 函数={defs[:8]}"
-            )
+            description = f"从 {repo_full_name} 提取: 类={classes[:5]}, 函数={defs[:8]}"
             contract = f"classes={classes[:5]}"
 
         return ExtractedMechanism(
@@ -90,7 +153,42 @@ class MechanismExtractor:
             description=description,
             repo=repo_full_name,
             contract=contract,
+            gene_specs=gene_specs,
         )
+
+    @staticmethod
+    def _parse_file_list(overview: str) -> list[str]:
+        """从 overview 末尾 '## Top-level files' 行解析文件名列表."""
+        m = re.search(r"## Top-level files\s*\n(.+)", overview)
+        if not m:
+            return []
+        return [f.strip() for f in m.group(1).split(",") if f.strip()]
+
+    def is_high_value(self, mech: ExtractedMechanism) -> tuple[bool, float]:
+        """高价值过滤: 有可调参数 或 与系统语义相关. 返回 (是否值得提取, 评分)."""
+        score = 0.0
+        if mech.gene_specs:
+            score += 0.5
+        # 语义相关度: 描述/contract 命中关键词
+        text = (mech.description + " " + mech.contract).lower()
+        hits = sum(1 for kw in self.RELEVANCE_KEYWORDS if kw in text)
+        score += min(0.5, hits * 0.1)
+        return score >= 0.3, round(score, 2)
+
+    def compile_to_mechanism(self, mech: ExtractedMechanism, paper_context: str = "") -> str | None:
+        """Step2 编译: 把理解的机制经 MechanismCompiler 编译成 BaseMechanism 子类.
+
+        复用 T4 管线(共享底座, 不重复造轮). 返回编译通过的 draft_code 或 None.
+        """
+        if self._compiler is None:
+            from prometheus_nexus.mechanisms.mechanism_compiler import MechanismCompiler
+            self._compiler = MechanismCompiler(llm=self.llm, store=self._store)
+        draft = self._compiler._compile_draft_with_fix(
+            mech.mechanism_summary or mech.description,
+            mech.name, system="你是机制编译器(从 GitHub 项目编译)",
+            paper_context=paper_context or mech.description,
+        )
+        return draft
 
     def extract_from_node(self, node) -> ExtractedMechanism | None:
         """P3: 从 learn 已吸收的 rail_t3 节点取 url, 提取机制(不重拉源)。

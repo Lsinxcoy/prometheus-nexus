@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import types
+import ast
 
 from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism
 from prometheus_nexus.mechanisms.source_fetcher import fetch_arxiv_fulltext
@@ -174,7 +175,41 @@ class MechanismCompiler:
         if cls is None:
             logger.debug("MechanismCompiler: draft 无 BaseMechanism 子类 %s", mechanism_name)
             return None
+        # Phase 1: run() 必须非空壳 — 引用 context 且返回非纯占位
+        if not self._run_is_non_trivial(draft_code):
+            logger.debug("MechanismCompiler: draft run() 为空壳/未用 context %s", mechanism_name)
+            return None
         return draft_code
+
+    @staticmethod
+    def _run_is_non_trivial(draft_code: str) -> bool:
+        """静态检查 run() 方法: 必须引用 context 参数, 且返回非纯 ok 占位.
+
+        劣质草案(如 `def run(self, ctx): return {"ok": True}`)不挂载 — 对系统无帮助.
+        这是对 '编译通过但语义空壳' 的守门升级(契合用户立场: 劣质草案无帮助).
+        """
+        try:
+            tree = ast.parse(draft_code)
+        except SyntaxError:
+            return False
+        run_func = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "run":
+                run_func = node
+                break
+        if run_func is None:
+            return False
+        # 必须引用 context 形参(否则机制对输入无感知, 无意义)
+        args = [a.arg for a in run_func.args.args]
+        if "context" not in args and "ctx" not in args:
+            return False
+        # 禁止纯占位返回: return {"ok": True} / return {"ok": True, "note": "..."}
+        for ret in ast.walk(run_func):
+            if isinstance(ret, ast.Return) and isinstance(ret.value, ast.Dict):
+                keys = [k.value for k in ret.value.keys if isinstance(k, ast.Constant)]
+                if keys == ["ok"] or (keys == ["ok", "note"]) or (keys == ["note", "ok"]):
+                    return False
+        return True
 
     def _compile_draft_with_fix(self, first_draft: str, mechanism_name: str,
                                 system: str | None = None,
@@ -187,7 +222,7 @@ class MechanismCompiler:
         """
         draft = first_draft
         last_err = ""
-        for attempt in range(self.MAX_DRAFT_FIX + 1):
+        for _ in range(self.MAX_DRAFT_FIX + 1):
             ok = self._validate_draft(draft, mechanism_name)
             if ok is not None:
                 return ok
@@ -219,7 +254,6 @@ class MechanismCompiler:
     def _strip_code_fence(text: str) -> str:
         """去掉 LLM 输出常见的 ```python ... ``` 包裹, 提取纯代码。"""
         if "```" in text:
-            # 取第一个 ``` 之后到下一个 ``` 之前的内容
             parts = text.split("```")
             for seg in parts:
                 seg = seg.strip()
@@ -227,7 +261,6 @@ class MechanismCompiler:
                     seg = seg.split("\n", 1)[1] if "\n" in seg else seg
                 if "class " in seg and "BaseMechanism" in seg:
                     return seg
-            # 退化: 去掉所有 ``` 行
             return "\n".join(l for l in text.splitlines() if not l.strip().startswith("```"))
         return text.strip()
 

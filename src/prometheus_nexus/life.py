@@ -2560,21 +2560,36 @@ class Omega:
     def _consume_t3(self, entry: dict) -> None:
         """T3(GitHub 机制提取)激活后: 把机制参数维度注入进化引擎 gene_specs.
 
-        走 A-B 并行原则(不强制覆盖): 注入的是候选基因维度, 由后续 evolve()
-        的适应度评估决定去留.
+        走 A-B 并行原则(不强制覆盖): 注入的是候选基因维度, 由后续 evolve() 的
+        适应度评估决定去留.
+
+        Phase 2: 强类型处理(修 'items' bug) — 仅当 gene_specs 是 dict 才注入,
+        不再把 contract 文本误当 gene_specs.
         """
         item_id = f"t3_{entry.get('name', '')}"
         self.attribution_scoring.create_work_item(item_id, "mechanism_activate", priority=5)
         data = entry.get("data", {})
-        specs = data.get("gene_specs") or {}
 
-        if not specs and data.get("executable") is not None:
-            specs = getattr(data["executable"], "gene_specs", {}) or {}
+        # 强类型提取 gene_specs: 优先 data 直接给的 dict, 否则从 executable 实例取
+        specs: dict = {}
+        direct = data.get("gene_specs")
+        if isinstance(direct, dict):
+            specs = direct
+        elif direct is not None:
+            logger.warning("Omega: T3 %s gene_specs 非 dict(类型=%s), 跳过注入",
+                           entry.get("name"), type(direct).__name__)
+        elif data.get("executable") is not None:
+            exe = data["executable"]
+            gs = getattr(exe, "gene_specs", None)
+            if isinstance(gs, dict):
+                specs = gs
+
         if specs:
             try:
                 added = self.evolution_engine.inject_gene_specs(specs)
                 self.attribution_scoring.complete_work_item(item_id)
-                logger.info("Omega: T3 %s injected %d gene specs into evolution engine", entry["name"], added)
+                logger.info("Omega: T3 %s injected %d gene specs into evolution engine",
+                            entry["name"], added)
             except Exception as e:
                 self.attribution_scoring.fail_work_item(item_id, str(e)[:60])
                 logger.warning("Omega: T3 consume failed: %s", e)

@@ -56,11 +56,20 @@ class SemanticEvolutionEngine:
                 if h >= 3:
                     # 高频概念: 提权(标记进化产出)
                     promoted += 1
-                    # 注入 gene_specs: 概念密度维度
-                    derived_specs[f"sem_{concept}"] = (0.0, 1.0)
                 elif h == 0 and concept_util[concept] < 0.3:
                     # 零命中低 utility: 剪枝标记
                     pruned += 1
+
+            # Phase 3: 语义->参数映射(替代原无意义 (0,1) 占位)
+            # 从 learn 节点语义聚类, 提取反复出现的主题 -> 系统可调维度强化提案.
+            from prometheus_nexus.evolution.semantic_to_param import SemanticToParam
+            mapper = SemanticToParam()
+            proposals = mapper.derive_proposals(list(nodes))
+            derived_specs = mapper.proposals_to_specs(proposals)
+            if proposals:
+                logger.info("SemanticEvo: 派生 %d 个强化提案(主题=%s)",
+                            len(proposals),
+                            ", ".join(f"{p['theme']}->{p['param']}" for p in proposals[:5]))
 
             self._generation += 1
 
@@ -69,19 +78,20 @@ class SemanticEvolutionEngine:
                 self.omega.mechanism_registry.register(
                     f"semantic_evo_g{self._generation}",
                     data={"concepts": dict(concept_hits), "promoted": promoted,
-                          "pruned": pruned, "derived_specs": derived_specs},
+                          "pruned": pruned, "derived_specs": derived_specs,
+                          "proposals": proposals},
                     category="semantic_evolution",
                 )
             except Exception as e:
                 logger.debug("SemanticEvo register failed: %s", e)
 
-            # T1<->T2 闭环: 把派生 specs 注入 EvolutionEngine(若支持)
+            # T1<->T2 闭环: 把派生 specs 经 T1 验证注入(走 inject_gene_specs + fitness 门),
+            # 而非直接 _gene_specs.update 绕过验证(原实现缺陷: 占位 (0,1) 无语义且免验证).
             try:
                 evo = getattr(self.omega, "evolution_engine", None)
                 if evo is not None and derived_specs:
-                    base = dict(getattr(evo, "_gene_specs", {}) or {})
-                    base.update(derived_specs)
-                    evo._gene_specs = base
+                    added = evo.inject_gene_specs(derived_specs)
+                    logger.info("SemanticEvo: T2 提案经 T1 验证注入 %d 个 gene specs", added)
             except Exception as e:
                 logger.debug("SemanticEvo inject specs failed: %s", e)
 

@@ -60,6 +60,13 @@ class Nexus:
         # ---- 路由覆盖: 动态机制接管基本盘 (name -> 动态 name) ----
         self._route_override: dict[str, str] = {}
 
+        # ---- Phase 0 共享脊柱: 效果遥测 + 选择门 ----
+        # EffectTracker 量化机制执行副作用; SelectionGate 做影子 A/B 选择.
+        from prometheus_nexus.evolution.effect_tracker import EffectTracker
+        from prometheus_nexus.evolution.selection_gate import SelectionGate
+        self.effect_tracker = EffectTracker(store=self._store)
+        self.selection_gate = SelectionGate()
+
         self._load()
 
     # ==================================================================
@@ -101,19 +108,62 @@ class Nexus:
             return {"registered": True, "name": name, "category": category, "status": entry["status"]}
 
     def mount_dynamic(self, name: str, instance: Any, category: str = "compiled",
-                      target_base: str | None = None) -> dict:
+                      target_base: str | None = None, candidate: bool = True) -> dict:
         """T3/T4 编译产物经沙箱加载后, 挂载进动态层 + 注册.
 
         这是"神经发生": 新机制长入大脑, 不碰基本盘源码.
         接管语义(对齐 P6 不自动直替): 仅当显式声明 target_base(宿主/论文指明
         覆盖哪个基本盘)时才设 route_override 接管; 否则仅挂动态层作候选.
+
+        Phase 0: 默认 candidate=True -> 经 SelectionGate 影子 A/B 评估后才 promote.
+        劣质/空壳机制停在 pending, 不直替生产.
         """
+        # candidate 默认 True: 进 pending(不激活), 等 SelectionGate 决策
         res = self.register_mechanism(name, instance=instance, category=category,
-                                      pending=False, is_dynamic=True)
+                                      pending=candidate, is_dynamic=True)
         if target_base and target_base in self._base_instances:
-            self.set_route_override(target_base, name)
-            logger.info("Nexus: 动态 %s 经显式声明接管基本盘 %s", name, target_base)
+            # 声明接管基本盘 -> 登记路由候选(仍受 SelectionGate 评估约束)
+            self._route_override[target_base] = name
+            logger.info("Nexus: 动态 %s 声明接管基本盘 %s (待 SelectionGate 评估)", name, target_base)
         return res
+
+    def evaluate_candidate(self, name: str, base_name: str | None = None) -> str:
+        """用已记录的 effect 历史对候选机制做 SelectionGate 决策.
+
+        返回 'promote' | 'prune' | 'hold'. promote -> 激活; prune -> 停用.
+        base_name 缺省时用该机制覆盖的 target_base(若有).
+        """
+        cand_effs = self._effects.get(name, [])
+        base = base_name or next((b for b, d in self._route_override.items() if d == name), None)
+        base_effs = self._effects.get(base, []) if base else []
+        # 用最近 N 次做对比(各取最近, 配对)
+        n = min(len(cand_effs), len(base_effs), self.selection_gate.min_samples)
+        if n < self.selection_gate.min_samples:
+            return "hold"
+        c = cand_effs[-n:]
+        b = base_effs[-n:]
+        decision = "hold"
+        for ce, be in zip(c, b):
+            decision = self.selection_gate.observe(name, ce, be)
+            if decision in ("promote", "prune"):
+                break
+        if decision == "promote":
+            self._activate(name)
+            logger.info("Nexus: 候选 %s 经 A/B 评估 promote(接管基本盘)", name)
+        elif decision == "prune":
+            self._deactivate(name)
+            logger.info("Nexus: 候选 %s 经 A/B 评估 prune(效果不优于 base)", name)
+        return decision
+
+    def _activate(self, name: str) -> None:
+        if name in self._mechanisms:
+            self._mechanisms[name]["status"] = "active"
+            self._enabled.add(name)
+
+    def _deactivate(self, name: str) -> None:
+        if name in self._mechanisms:
+            self._mechanisms[name]["status"] = "disabled"
+            self._enabled.discard(name)
 
     # ==================================================================
     # 7 管道注册
@@ -154,17 +204,30 @@ class Nexus:
                 entry["invoke_count"] = entry["invoke_count"] + 1
                 entry["last_invoked"] = time.time()
         # 转调执行后端(不双重执行)
+        # Phase 0: 执行前后自动测量效果 -> record_effect(让 dispatch 自带遥测,
+        # 无需调用方手动 record_effect). 测量不影响主流程(异常仍向上传播前记录).
+        before = self.effect_tracker.snapshot_system(self._store) if self.effect_tracker else {}
+        before["output"] = None
+        after = dict(before)
         try:
-            fn = getattr(inst, method, None)
-            if fn is None:
-                return None
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            after["output"] = result
         except Exception as e:
+            after["error"] = str(e)[:60]
             with self._lock:
                 if entry:
                     entry["error_count"] = entry["error_count"] + 1
             logger.warning("Nexus.dispatch: %s.%s 失败: %s", name, method, str(e)[:60])
+            # 记录失败效果后仍向上返回 None(保持原语义)
+            if self.effect_tracker and entry is not None:
+                eff = self.effect_tracker.measure_side_effects(before, after)
+                self.record_effect(target, eff)
             return None
+        # 成功路径: 测量效果并记账
+        if self.effect_tracker and entry is not None:
+            eff = self.effect_tracker.measure_side_effects(before, after)
+            self.record_effect(target, eff)
+        return result
 
     def mark_invoked(self, name: str) -> None:
         """轻量记账(供 life.py 直接调用点补记, 不转调)."""
@@ -324,6 +387,8 @@ class Nexus:
                 "enabled": sorted(self._enabled),
                 "dynamic_names": sorted(self._dynamic.keys()),
                 "route_override": self._route_override,
+                # Phase 0: 选择门决策持久化(候选机制 promote/prune 不丢)
+                "selection_gate": self.selection_gate.serialize(),
             }
             tmp = self._path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -344,6 +409,14 @@ class Nexus:
             self._mechanisms = blob.get("mechanisms", {})
             self._enabled = set(blob.get("enabled", []))
             self._route_override = blob.get("route_override", {})
+            # Phase 0: 恢复选择门决策(候选 promote/prune 状态跨会话保留)
+            sg = blob.get("selection_gate")
+            if sg:
+                from prometheus_nexus.evolution.selection_gate import SelectionGate
+                try:
+                    self.selection_gate = SelectionGate.deserialize(sg)
+                except Exception as e:
+                    logger.debug("Nexus: selection_gate 恢复失败(用空白): %s", e)
         except Exception as e:
             logger.warning("Nexus._load failed: %s", e)
 
