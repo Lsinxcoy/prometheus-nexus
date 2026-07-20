@@ -23,6 +23,7 @@ import os
 import json
 import threading
 import time
+import uuid
 
 from prometheus_nexus.foundation.schema import (
     Node, Edge, NodeType, EdgeType, TrustLevel,
@@ -588,6 +589,7 @@ class Omega:
         # 供最细粒度监控"这段时间产出了什么"视角使用.
         # 下划线开头: 避免被 Nexus 统合当成机制包裹成 NexusProxy.
         self._productions = []
+        self._active_event_id = None  # 当前触发链 ID(learn 链内所有 record 继承, 供监控精确归链)
         self._production_lock = threading.Lock()
 
         # 运行问题收集器: 记录系统运行期间真实产生的 BUG/异常/关键WARNING,
@@ -1109,10 +1111,13 @@ class Omega:
     # ============================================================
     # remember pipeline (11 stages)
     # ============================================================
-    def record_production(self, ptype: str, summary: str, detail: dict | None = None):
+    def record_production(self, ptype: str, summary: str, detail: dict | None = None,
+                          event_id: str | None = None, parent: str | None = None):
         """产出账本: 记录系统真实产出(知识/机制/信念/反思/修剪).
 
         ptype: knowledge | mechanism | belief | reflection | evolution | prune
+        event_id: 触发链 ID(learn 链内共享, 供监控精确归链); 缺省继承 _active_event_id
+        parent: 上游 production id(可选, 构建链)
         """
         try:
             with self._production_lock:
@@ -1129,11 +1134,15 @@ class Omega:
                         or (ptype != "knowledge" and p["summary"] == summary)
                     ):
                         return  # 重复, 跳过
+                _eid = event_id if event_id is not None else getattr(self, "_active_event_id", None)
                 self._productions.append({
+                    "id": uuid.uuid4().hex[:12],
                     "ts": time.time(),
                     "type": ptype,
                     "summary": summary,
                     "detail": detail or {},
+                    "event_id": _eid,
+                    "parent": parent,
                 })
                 # 防无限增长: 保留最近 5000 条
                 if len(self._productions) > 5000:
@@ -1241,9 +1250,9 @@ class Omega:
         return h
 
     def remember(self, content: str, utility: float = 0.5, tags: list[str] | None = None,
-
                  branch: str = "main", trust_level: str = "fact",
-                 node_type: NodeType = NodeType.FACT, url: str = "") -> str:
+                 node_type: NodeType = NodeType.FACT, url: str = "",
+                 bypass_dopamine: bool = False) -> str:
         # 管道运行计数(监控可见性)
         try:
             self.nexus._pipelines.setdefault("remember", {"runs": 0, "failures": 0, "last_run": None})
@@ -1332,11 +1341,12 @@ class Omega:
             logger.debug("Trigger detector failed: %s", e)
 
         # ===== 原有逻辑 =====
-        gate = self.dopamine.evaluate(utility=utility, surprise=surprise)
-        if gate.decision == "reject":
-            self.wal.rollback_tx(tx_id)
-            self.failure_log.log("remember", "dopamine_rejected", {"score": gate.score})
-            return ""
+        if not bypass_dopamine:
+            gate = self.dopamine.evaluate(utility=utility, surprise=surprise)
+            if gate.decision == "reject":
+                self.wal.rollback_tx(tx_id)
+                self.failure_log.log("remember", "dopamine_rejected", {"score": gate.score})
+                return ""
 
         # Create node
         node = Node(id=generate_uuidv7(), type=node_type, content=content,
@@ -3216,6 +3226,8 @@ class Omega:
     # learn pipeline
     # ============================================================
     def learn(self, source: str = "web", query: str = "AI", max_results: int = 5) -> dict:
+        # 触发链 ID: 本次 learn 及同步触发的 remember/reflect/evolve/dream 共享, 供监控精确归链
+        eid = uuid.uuid4().hex[:8]
         # 链上下文: 读取触发管信号（如 recall 检测到的知识缺口）
         learn_diagnostics: Dict[str, Any] = {}
         try:
@@ -3342,9 +3354,15 @@ class Omega:
             base_u = _SRC_WEIGHT.get(source, 0.6)
             ntype, rails = _classify(source, f"{r.title}: {r.content}", norm_tags)
             node_tags = norm_tags + rails  # rail 标签并入 tags, 下游按 tag 路由
-            node_id = self.remember(content=f"{r.title}: {r.content}",
-                                    utility=base_u, tags=node_tags,
-                                    node_type=ntype, url=getattr(r, "url", ""))
+            _eid_prev = self._active_event_id
+            self._active_event_id = eid
+            try:
+                node_id = self.remember(content=f"{r.title}: {r.content}",
+                                        utility=base_u, tags=node_tags,
+                                        node_type=ntype, url=getattr(r, "url", ""),
+                                        bypass_dopamine=True)
+            finally:
+                self._active_event_id = _eid_prev
             if node_id:
                 new_nodes.append(node_id)
                 # 【P0修复】注册到LearnFeedbackTracker

@@ -49,6 +49,8 @@ netoff_plugin.py
 pytest_*.log
 verify_codefix.log
 
-explorer_state.json.bak
-omega_state.json.bak
-*.json.bak
+# 根目录运行时日志/临时文件(避免误提交)
+/api_server.log
+/*.csv
+/nul
+

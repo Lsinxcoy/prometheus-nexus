@@ -90,10 +90,23 @@ _TIMEOUT = 15  # seconds
 MAX_SCAN_HISTORY = 1000
 
 
-def _http_get(url: str, headers: dict | None = None) -> str | None:
-    """Fetch URL with timeout and error handling."""
+def _http_get(url: str, headers: dict | None = None, proxy: str | None = None) -> str | None:
+    """Fetch URL with timeout and error handling.
+
+    If ``proxy`` is given (e.g. http://127.0.0.1:7890), the request is routed
+    through that proxy via an explicit ProxyHandler so it works regardless of
+    the process-wide urllib opener state.
+    """
     req = urllib.request.Request(url, headers=headers or {"User-Agent": "PrometheusUltra/1.0"})
+    opener = None
+    if proxy:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
     try:
+        if opener:
+            with opener.open(req, timeout=_TIMEOUT) as resp:
+                return resp.read().decode("utf-8", errors="replace")
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
@@ -169,7 +182,19 @@ class KnowledgeScanner:
         return results
 
     def _scan_arxiv(self, query: str, max_results: int) -> list[ScanResult]:
-        """Scan arXiv via the Atom API (export.arxiv.org)."""
+        """Scan arXiv via the Atom API (export.arxiv.org).
+
+        Routes through an explicit proxy (env ARXIV_PROXY / ULTRA_PROXY /
+        HTTPS_PROXY, falling back to the user-specified 127.0.0.1:7890) so it
+        works even when the process-wide urllib opener proxy is unavailable.
+        """
+        import os
+        _arxiv_proxy = (
+            os.environ.get("ARXIV_PROXY")
+            or os.environ.get("ULTRA_PROXY")
+            or os.environ.get("HTTPS_PROXY")
+            or "http://127.0.0.1:7890"
+        )
         params = urllib.parse.urlencode({
             "search_query": f"all:{query}",
             "start": 0,
@@ -178,7 +203,7 @@ class KnowledgeScanner:
             "sortOrder": "descending",
         })
         url = f"https://export.arxiv.org/api/query?{params}"
-        xml_text = _http_get(url)
+        xml_text = _http_get(url, proxy=_arxiv_proxy)
         if not xml_text:
             logger.debug("Scanner: arXiv unreachable, skipping (no offline fallback)")
             return []
