@@ -2929,6 +2929,15 @@ class Omega:
             try:
                 avgs = self.utility_tracker.get_all_averages()  # node_id -> 真实效用
                 anchor = sum(avgs.values()) / len(avgs) if avgs else 0.5
+                # Phase 5: 验证锚共享 — 附加 EffectTracker 聚合的机制真实执行效果,
+                # 消除 T1 fitness 自指(不仅看节点效用, 也看机制实跑效果).
+                nx = getattr(self, "nexus", None)
+                if nx is not None and getattr(nx, "effect_tracker", None) is not None:
+                    mech_eff = nx.effect_tracker.aggregate_mechanism_effect(
+                        getattr(nx, "_effects", {}))
+                    if mech_eff is not None:
+                        # 节点效用锚 与 机制执行效果锚 取均值, 双信号校验
+                        anchor = (anchor + mech_eff) / 2.0
                 self.evolution_engine.set_utility_anchor(anchor)
             except Exception:
                 pass

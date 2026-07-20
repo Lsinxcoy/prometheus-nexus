@@ -81,6 +81,23 @@ class EffectTracker:
             after["error"] = str(e)[:60]
         return self.measure_side_effects(before, after), after
 
+    @staticmethod
+    def aggregate_mechanism_effect(effects_dict: dict[str, list[float]]) -> float | None:
+        """聚合所有机制的最近执行效果均值(Phase 5: T1 验证锚共享).
+
+        effects_dict: name -> [effect, ...] (nexus._effects 格式).
+        返回最近 N 次效果均值; 无数据返回 None(调用方退回单信号锚).
+        """
+        if not effects_dict:
+            return None
+        recent: list[float] = []
+        for vals in effects_dict.values():
+            if vals:
+                recent.extend(vals[-5:])  # 每机制取最近 5 次
+        if not recent:
+            return None
+        return sum(recent) / len(recent)
+
     def run_probe(self, candidate_fn: Callable, base_fn: Callable,
                   probes: list[dict]) -> tuple[float, float]:
         """对固定 probe 集并行跑 candidate vs base, 返回 (cand_avg, base_avg) effect.

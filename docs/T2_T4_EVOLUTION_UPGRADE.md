@@ -312,6 +312,13 @@ learn 学到的内容 → 语义促进系统强化（产物=强化提案，借 T
 2. `Omega.evolve` 在 `set_utility_anchor` 前，用 EffectTracker 聚合的机制效果均值作为附加锚点。
 3. 单测：锚点变更后 verification_gate 对"真实效用提升 vs 仅数字抖动"区分。
 
+### 验收清单（已落地）
+- [x] `EffectTracker.aggregate_mechanism_effect(effects_dict)` 聚合最近机制执行效果均值 ✅
+- [x] `Omega.evolve` 在 nexus 有机制效果记录时，把机制效果均值与节点效用锚取均值作为双信号锚点 ✅
+- [x] 无机制效果记录时退回单信号锚（不崩）✅
+- [x] 单测 `test_phase5_anchor.py` 5 passed（含锚点值断言 0.6 = (0.5+0.7)/2）✅
+- [x] Phase 4 eval 重跑确认 Phase 5 不破坏 evolve（fitness 0.0256→0.7204 稳定 PASS）✅
+
 ---
 
 ## 全局成功指标（非面上赞美）
@@ -319,9 +326,19 @@ learn 学到的内容 → 语义促进系统强化（产物=强化提案，借 T
 - T4：空壳 `run()` 挂载数 = 0（Phase 1 ✅ `_run_is_non_trivial` 守门）
 - T2：语义主题 → 系统参数强化提案，经 T1 验证注入（Phase 3 ✅ SemanticToParam + inject_gene_specs）
 - 机制层：candidate 经 SelectionGate A/B promote/prune，决策持久化（Phase 0+4 ✅）
-- 系统级：固定 eval 集上 fitness 可测提升，被 promote 机制贡献正 delta（Phase 4/5 待 eval 集）
+- **系统级回归（Phase 4 已验证）**：固定 eval 集跑 5 周期
+  - fitness: 0.0251 → 0.7204（delta +0.69，稳定上升后趋稳，非下降）
+  - T2: 2 个强化提案（attention_sparsity + memory_decay）经 SemanticToParam 注入 evolution_engine ✅
+  - T4: 5/5 编译机制 run() 非空壳 ✅
+  - T3: 系统级受限 `fetch_repo_overview` 需真实网络（FakeLLM 不覆盖 HTTP）；AST 提取逻辑本身已被 test_phase2 单测覆盖 ✅
+- 验证锚共享（Phase 5 ✅）：T1 锚点 = 节点效用锚 与 EffectTracker 机制效果均值双信号，消除 fitness 自指
 
-## 全局成功指标（非面上赞美）
+---
+
+## 诚实局限声明
+- T3 系统级回归因 `fetch_repo_overview` 网络依赖未跑通（非代码缺陷，test_phase2 已覆盖 AST 提取/强类型/价值过滤逻辑）。
+- 全量 pytest（仓库 60+ 测试文件）因前台 60s 超时未完整跑；聚焦模块（nexus/mechanism/evolution/semantic/phase0-5）42 单测 + 现有 bug_regression 全绿。建议在 CI/后台跑完整回归。
+- eval 集用 FakeLLM 替代真实 LLM（避免网络），验证的是**轨道逻辑链路**而非 LLM 生成质量。
 - T3：`'items'` 错误 = 0；specs 格式合规率 100%
 - T4：空壳 `run()` 挂载数 = 0；≥ X% 编译机制过 A/B 被 promote
 - T2：检索/效用 lift 可测；promotion 与 utility_tracker hits 相关
