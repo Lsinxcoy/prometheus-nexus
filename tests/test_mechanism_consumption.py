@@ -63,16 +63,23 @@ def test_speculative_promote_writes_consumed_at():
 
 
 def test_aggregation_covers_all_carriers():
-    """聚合器返回 total/consumed/by_carrier, 且含全 6 类键。"""
-    o = Omega(db_path="src/prometheus_nexus.db")
+    """聚合器返回 total/consumed/by_carrier, 且统一归到 Nexus 真相源.
+
+    CNS 重构后机制层已并入 Nexus, get_mechanism_consumption 不再重复聚合
+    旧 6 类独立载体, 而是委托 Nexus 统一真相源(见 life.py docstring).
+    故 by_carrier 以 'nexus' 为唯一载体键, totals 与 Nexus 快照对齐.
+    """
+    o = Omega()  # 走 conftest 隔离 db, 避免相对路径历史污染
     snap = o.get_mechanism_consumption()
     assert "total" in snap and "consumed" in snap and "rate" in snap
     bc = snap["by_carrier"]
-    # 至少应含 mechanism_registry / skill_registry / handook / instincts / harness_x
-    for key in ["mechanism_registry", "skill_registry", "handbook", "instincts", "harness_x"]:
-        assert key in bc, f"聚合器漏掉载体: {key}"
-    # 总机制数应 > 仅看 mechanism_registry 的数 (handbook 单类就数千条)
-    assert snap["total"] >= bc["mechanism_registry"]["total"], "total 应含全类"
+    # CNS 重构后统一载体为 'nexus' (机制层已并入 Nexus 真相源)
+    assert "nexus" in bc, "聚合器应以 nexus 为统一载体键"
+    # totals 与 Nexus 真相源对齐
+    assert bc["nexus"]["total"] == snap["total"], "nexus 载体 total 应等于快照 total"
+    assert bc["nexus"]["consumed"] == snap["consumed"], "nexus 载体 consumed 应等于快照 consumed"
+    # 真实机制已加载 (基本盘 236 + 动态层)
+    assert snap["total"] > 0, "应加载到真实机制"
     o.shutdown() if hasattr(o, "shutdown") else None
 
 

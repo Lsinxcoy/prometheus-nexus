@@ -19,7 +19,11 @@ def test_rumination_wired_into_omega():
     print("\n=== Test 1: 反刍引擎接入 Omega ===")
     o = Omega()
     assert hasattr(o, 'rumination_engine'), "Omega 应有 rumination_engine"
-    assert isinstance(o.rumination_engine, KnowledgeRuminationEngine)
+    # CNS 重构后机制经 Nexus 统合层包成 NexusProxy(透明代理), 解包取真实实例
+    eng = o.rumination_engine
+    if hasattr(eng, '_instance'):
+        eng = eng._instance
+    assert isinstance(eng, KnowledgeRuminationEngine)
     print("✅ rumination_engine 已接入")
     # SemanticLearner 也真正接了
     assert hasattr(o, 'semantic_learner'), "Omega 应有 semantic_learner"

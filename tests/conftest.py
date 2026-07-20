@@ -29,6 +29,21 @@ def _isolate_store_db(monkeypatch):
 
     monkeypatch.setattr(life_mod.Omega, "__init__", _patched_init)
 
+    # owner_harm 的违规日志持久化到固定 archive/ 路径(跨重启不丢),
+    # 但测试假设全新实例 violation_count==0. 此处把该路径也隔离到临时目录,
+    # 避免历史运行残留污染(否则每次跑 Omega 都会累计写日志).
+    from prometheus_nexus.safety.owner_harm import OwnerHarmTrustBoundary
+    _oh_init = OwnerHarmTrustBoundary.__init__
+
+    def _oh_isolated_init(self, *a, **kw):
+        _oh_init(self, *a, **kw)
+        self._viol_log_path = os.path.join(
+            tempfile.gettempdir(),
+            f"ultra_owner_harm_viol_{os.getpid()}_{id(self)}.json",
+        )
+
+    monkeypatch.setattr(OwnerHarmTrustBoundary, "__init__", _oh_isolated_init)
+
 
 def pytest_collection_modifyitems(config, items):
     """集成 server 测试需外部/真实 server, 无 RUN_SERVER_TESTS 环境变量时跳过。

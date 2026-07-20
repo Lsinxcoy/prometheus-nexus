@@ -264,7 +264,11 @@ class TestIntegrationWithLifecycle:
         o = Omega(config=cfg)
         try:
             assert hasattr(o, "rubric")
-            assert isinstance(o.rubric, RubricScorer)
+            rub = o.rubric
+            # CNS 重构后机制经 Nexus 统合层包成 NexusProxy(透明代理), 解包取真实实例
+            if hasattr(rub, "_instance"):
+                rub = rub._instance
+            assert isinstance(rub, RubricScorer)
         finally:
             o.close()
             if os.path.exists(db):

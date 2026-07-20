@@ -43,3 +43,12 @@ ultra_start.bat
 nexus_start.bat
 watchdog_9200.py
 feishu_secret.json
+
+# 测试辅助/日志(离线插件等)
+netoff_plugin.py
+pytest_*.log
+verify_codefix.log
+
+explorer_state.json.bak
+omega_state.json.bak
+*.json.bak
