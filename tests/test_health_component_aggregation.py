@@ -9,6 +9,9 @@
 
 本测试注入组件失败, 断言引擎健康正确降级, 且不破坏 equilibrium 优先信号
 与空库/异常兜底。
+
+注意: 所有实例方法打桩均经 monkeypatch(自动回滚), 避免污染共享单例
+(如 store/equilibrium) 拖累后续测试(尤其 test_empty_store_short_circuits)。
 """
 from prometheus_nexus.foundation.schema import AlertLevel
 import prometheus_nexus.life as life_mod
@@ -24,21 +27,21 @@ def _raiser(msg):
     return _f
 
 
-def test_healthy_when_all_components_ok():
+def test_healthy_when_all_components_ok(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.GREEN
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     # 全部组件正常 -> healthy
     assert o._compute_health() == "healthy"
     assert o.status().health == "healthy"
 
 
-def test_single_component_failure_downgrades_to_degraded():
+def test_single_component_failure_downgrades_to_degraded(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.GREEN
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     # 仅 evolution_engine 失败 -> 应降级 (原先会被隐藏为 healthy)
-    o.evolution_engine.get_stats = _raiser("boom")
+    monkeypatch.setattr(o.evolution_engine, "get_stats", _raiser("boom"))
     assert o._compute_health() == "degraded"
     st = o.status()
     assert st.health == "degraded"
@@ -46,39 +49,39 @@ def test_single_component_failure_downgrades_to_degraded():
     assert st.details["evolution_engine"]["error"] == "boom"
 
 
-def test_many_component_failures_escalate_to_critical():
+def test_many_component_failures_escalate_to_critical(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.GREEN
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     # 超过阈值(HEALTH_CRITICAL_COMPONENT_FAILURES=3)个组件失败 -> critical
     for attr in ("evolution_engine", "five_gates", "dopamine", "constitution"):
-        setattr(getattr(o, attr), "get_stats", _raiser(f"{attr} down"))
+        monkeypatch.setattr(getattr(o, attr), "get_stats", _raiser(f"{attr} down"))
     assert o._compute_health() == "critical"
 
 
-def test_equilibrium_red_overrides_component_health():
+def test_equilibrium_red_overrides_component_health(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.RED
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.RED)
     # equilibrium RED 是最优先信号, 即便组件全绿仍 critical
     assert o._compute_health() == "critical"
 
 
-def test_equilibrium_orange_yields_degraded():
+def test_equilibrium_orange_yields_degraded(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.ORANGE
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.ORANGE)
     assert o._compute_health() == "degraded"
 
 
-def test_status_health_consistent_with_compute():
+def test_status_health_consistent_with_compute(monkeypatch):
     o = _omega()
-    o.store.get_node_count = lambda: 5
-    o.equilibrium.get_alert_level = lambda: AlertLevel.GREEN
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 5)
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     assert o.status().health == o._compute_health()
 
 
-def test_empty_store_short_circuits():
+def test_empty_store_short_circuits(monkeypatch):
     o = _omega()  # 全新临时库, 节点为 0
-    o.equilibrium.get_alert_level = lambda: AlertLevel.GREEN
+    monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     assert o._compute_health() == "empty"

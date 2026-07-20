@@ -2711,7 +2711,6 @@ class Omega:
 
         # Semantic Early-Stopping check
         ses_decision = self.semantic_early_stopping.check(context)
-        chain_trace["semantic"] = True  # 语义阶段已执行(无论放行/停止), 标记避免进化链误报缺失
         if ses_decision.should_stop:
             blocked = EvolutionOutcome(result=EvolutionResult.BLOCKED, details="semantic_early_stop")
             self._telemetry["evolve"] = blocked
@@ -2924,6 +2923,7 @@ class Omega:
             chain_trace["semantic"] = True
         except Exception as e:
             logger.debug("Evolve: T2 semantic evolution failed: %s", e)
+            chain_trace["semantic"] = False  # 失败必须显式标记, 否则 chain_complete 误报成功
 
         # ===== S3: T1 进化状态持久化(跨会话累积) =====
         # save() 永不抛出(内部已捕获), 失败时记 WARNING 并返回 False;

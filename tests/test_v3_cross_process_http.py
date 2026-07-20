@@ -5,9 +5,6 @@
 
 端口/DB 隔离: 用随机端口 + 临时 DB, 避免与开发实例冲突.
 """
-import sys
-sys.path.insert(0, "E:/Prometheus-Ultra-MultiTypeKB/src")
-
 import os
 import sys as _sys
 import time
@@ -18,8 +15,8 @@ import json
 import pytest
 
 # 确保用项目 venv 的 python
-PY = os.environ.get("ULTRA_PY", r"E:/Prometheus-Ultra-MultiTypeKB/.venv/Scripts/python.exe")
-SRC = r"E:/Prometheus-Ultra-MultiTypeKB/src"
+PY = os.environ.get("ULTRA_PY", r"E:/Prometheus Nexus/.venv/Scripts/python.exe")
+SRC = r"E:/Prometheus Nexus/src"
 
 
 def _free_port() -> int:

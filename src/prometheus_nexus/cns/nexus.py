@@ -393,3 +393,17 @@ class NexusProxy:
 
     def __delattr__(self, key):
         object.__getattribute__(self, "_instance").__delattr__(key)
+
+    # 容器/迭代 dunder 透明转发到真实实例 —— 避免调用点把代理当容器迭代时
+    # 抛 'NexusProxy' object is not iterable (CNS 重构后部分调用点直接迭代机制属性)
+    def __iter__(self):
+        return iter(object.__getattribute__(self, "_instance"))
+
+    def __len__(self):
+        return len(object.__getattribute__(self, "_instance"))
+
+    def __getitem__(self, key):
+        return object.__getattribute__(self, "_instance")[key]
+
+    def __contains__(self, item):
+        return item in object.__getattribute__(self, "_instance")

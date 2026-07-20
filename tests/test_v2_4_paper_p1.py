@@ -4,9 +4,6 @@
 - P1-b (论文⑥ Superposition): 机制叠加态候选 — 运行时按上下文动态选择
 - P1-c (论文② HeRA): 跨 NodeType 拓扑对齐 — 多 rail 节点获对齐增益
 """
-import sys
-sys.path.insert(0, "E:/Prometheus-Ultra-MultiTypeKB/src")
-
 import pytest
 import tempfile
 import os
@@ -49,7 +46,11 @@ class TestP1aFutureAware:
         db = os.path.join(tempfile.gettempdir(), f"ultra_p1a2_{os.getpid()}_{id(object())}.db")
         o = Omega(db_path=db)
         import inspect
-        sig = inspect.signature(o.recall)
+        # CNS 重构后 o.recall 被 _wrapped 包装(签名含 _orig/_pn 形参); 真实方法存于 __kwdefaults__['_orig']
+        recall_fn = o.recall
+        if getattr(recall_fn, "__kwdefaults__", None) and "_orig" in recall_fn.__kwdefaults__:
+            recall_fn = recall_fn.__kwdefaults__["_orig"]
+        sig = inspect.signature(recall_fn)
         assert sig.parameters.get("future_aware").default is True
         o.store.close()
         try:

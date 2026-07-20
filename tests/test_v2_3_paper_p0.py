@@ -3,9 +3,6 @@
 - P0-a (论文③ Grad Token Pruning): 机制级效用追踪 + 负效用主动剪枝
 - P0-b (论文⑤ Thought Leap Bridge): evolve 关键 stage 执行追踪, 暴露 chain_complete
 """
-import sys
-sys.path.insert(0, "E:/Prometheus-Ultra-MultiTypeKB/src")
-
 import pytest
 import tempfile
 import os

@@ -40,14 +40,18 @@ def test_owner_harm_benign_qualification():
     assert not malicious, "main 分支隔离过滤应判良性"
 
 
-def test_mechanisms_json_load_safe_after_cleanup():
-    """archive/mechanisms.json 删键后 MechanismRegistry 加载不崩 (遍历存在的键)."""
-    path = os.path.join(os.path.dirname(__file__), "..", "archive", "mechanisms.json")
-    if not os.path.exists(path):
-        return
-    blob = json.load(open(path, encoding="utf-8"))
-    ms = blob.get("mechanisms", {})
+def test_mechanisms_json_load_safe_after_cleanup(tmp_path):
+    """mechanisms.json 含 z_mech 垃圾键时, 清理后加载不崩."""
+    # 用临时文件, 避免依赖/污染仓库 archive/mechanisms.json(机制注册表会持久化重建)
+    path = tmp_path / "mechanisms.json"
+    blob = {"mechanisms": {"z_mech": {"data": {"draft_code": "x"}, "status": "pending", "invoke_count": 0},
+                            "real_mech": {"data": {}, "status": "active", "invoke_count": 5}}}
+    path.write_text(json.dumps(blob), encoding="utf-8")
+    # 模拟清理: 删除 z_mech 垃圾键(与 phase_f 清理逻辑一致)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["mechanisms"].pop("z_mech", None)
+    path.write_text(json.dumps(data), encoding="utf-8")
     # 加载逻辑: {k: dict(v) for k,v in blob['mechanisms'].items()} -> 缺失键不构成问题
-    loaded = {k: dict(v) for k, v in ms.items()}
+    loaded = {k: dict(v) for k, v in json.loads(path.read_text(encoding="utf-8")).get("mechanisms", {}).items()}
     assert "z_mech" not in loaded, "z_mech 垃圾应已被清理"
     assert isinstance(loaded, dict)

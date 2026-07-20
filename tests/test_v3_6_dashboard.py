@@ -5,9 +5,6 @@
 - /api/v1/dashboard/static/dashboard.css + dashboard.js 可访问
 - /dashboard 返回新 HTML(引用 static 资源)
 """
-import sys
-sys.path.insert(0, "E:/Prometheus-Ultra-MultiTypeKB/src")
-
 import os
 import socket
 import subprocess
@@ -16,8 +13,8 @@ import time
 import urllib.request
 import pytest
 
-PY = os.environ.get("ULTRA_PY", r"E:/Prometheus-Ultra-MultiTypeKB/.venv/Scripts/python.exe")
-SRC = r"E:/Prometheus-Ultra-MultiTypeKB/src"
+PY = os.environ.get("ULTRA_PY", r"E:/Prometheus Nexus/.venv/Scripts/python.exe")
+SRC = r"E:/Prometheus Nexus/src"
 
 
 def _free_port():
