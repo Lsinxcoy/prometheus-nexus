@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import types
 
 from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism
 from prometheus_nexus.mechanisms.source_fetcher import fetch_arxiv_fulltext
@@ -83,7 +84,16 @@ class MechanismCompiler:
             out = self.llm.complete(prompt, system="你是机制编译器(三级渐进)")
             if out:
                 description = out
-                draft_code = out
+                # 编译校验 + LLM 自修正循环: 劣质草案(全角噪音/非合法类)不过编译,
+                # 不挂载为候选。把 SyntaxError 反馈给 LLM 重生成, 直到编译通过且是
+                # 合法 BaseMechanism 子类。最多 MAX_DRAFT_FIX 次, 仍失败则丢弃(不降级为占位)。
+                draft_code = self._compile_draft_with_fix(
+                    out, mechanism_name, system="你是机制编译器(三级渐进)",
+                    paper_context=f"论文: {paper_title}\n{fulltext[:4000]}",
+                )
+                if not draft_code:
+                    logger.warning("MechanismCompiler: LLM draft 无法编译通过, 丢弃(不挂载劣质草案) %s", mechanism_name)
+                    return None
         else:
             # 降级(P2a): 无 LLM 时规则提取, 但 draft 不能是纯 stub 空壳 —
             # 至少含机制描述 + target_location(若已定位) + 人工 apply 指令, 让激活后仍有意义.
@@ -134,6 +144,101 @@ class MechanismCompiler:
             name=mechanism_name, description=description, paper=arxiv_id,
             draft_code=draft_code, target_location=target_location,
         )
+
+    # 自修正循环上限: LLM 生成的草案编译不过时, 最多重生成次数
+    MAX_DRAFT_FIX = 2
+
+    def _validate_draft(self, draft_code: str, mechanism_name: str) -> str | None:
+        """编译 draft_code 并校验是合法 BaseMechanism 子类.
+
+        返回通过编译且含合法子类的 draft_code; 否则返回 None(劣质草案)。
+        仅做 compile + 类检查, 不执行(安全边界同 MechanismSandbox)。
+        """
+        if not draft_code or not draft_code.strip():
+            return None
+        try:
+            mod = types.ModuleType(f"_mech_chk_{mechanism_name}")
+            mod.__dict__["BaseMechanism"] = BaseMechanism
+            code = compile(draft_code, f"<mech_{mechanism_name}>", "exec")
+            exec(code, mod.__dict__)  # noqa: S102 — 仅编译/类检查, 不运行
+        except Exception as e:
+            logger.debug("MechanismCompiler: draft 校验失败 %s: %s", mechanism_name, e)
+            return None
+        # 必须含 BaseMechanism 子类(非 BaseMechanism 本身)
+        cls = None
+        for v in mod.__dict__.values():
+            if (isinstance(v, type) and issubclass(v, BaseMechanism)
+                    and v is not BaseMechanism):
+                cls = v
+                break
+        if cls is None:
+            logger.debug("MechanismCompiler: draft 无 BaseMechanism 子类 %s", mechanism_name)
+            return None
+        return draft_code
+
+    def _compile_draft_with_fix(self, first_draft: str, mechanism_name: str,
+                                system: str | None = None,
+                                paper_context: str = "") -> str | None:
+        """LLM 草案编译校验 + 自修正循环.
+
+        首稿编译/类检查不过, 把具体 SyntaxError 反馈给 LLM 修正重生成,
+        直到通过或达到 MAX_DRAFT_FIX 上限. 全部失败返回 None(调用方丢弃,
+        不挂载劣质/占位草案)。
+        """
+        draft = first_draft
+        last_err = ""
+        for attempt in range(self.MAX_DRAFT_FIX + 1):
+            ok = self._validate_draft(draft, mechanism_name)
+            if ok is not None:
+                return ok
+            if self.llm is None or not self.llm.available:
+                return None
+            # 构造修正 prompt: 反馈上次错误, 要求只输出纯 Python
+            fix_prompt = (
+                f"你上一版机制代码无法通过 Python 编译, 错误: {last_err or '未通过编译/非 BaseMechanism 子类'}.\n"
+                f"请修正并**只输出**一个继承 BaseMechanism 的 Python 类定义(无解释/无 Markdown 代码块标记/无全角标点):\n"
+                f"- 必须 `from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism`\n"
+                f"- class 内实现 `def run(self, context=None) -> dict:`\n"
+                f"- 仅用半角标点, 不要用中文全角逗号/冒号/括号\n\n"
+                f"原始论文上下文:\n{paper_context[:3000]}\n\n"
+                f"上一版代码:\n{draft[:2000]}\n"
+            )
+            try:
+                fixed = self.llm.complete(fix_prompt, system=system, temperature=0.2)
+            except Exception as e:
+                logger.warning("MechanismCompiler: draft 修正调用 LLM 失败 %s: %s", mechanism_name, e)
+                return None
+            if not fixed:
+                return None
+            # 剥离可能的 Markdown 代码块包裹
+            draft = self._strip_code_fence(fixed)
+            last_err = self._last_compile_error(draft, mechanism_name)
+        return None
+
+    @staticmethod
+    def _strip_code_fence(text: str) -> str:
+        """去掉 LLM 输出常见的 ```python ... ``` 包裹, 提取纯代码。"""
+        if "```" in text:
+            # 取第一个 ``` 之后到下一个 ``` 之前的内容
+            parts = text.split("```")
+            for seg in parts:
+                seg = seg.strip()
+                if seg.startswith("python") or seg.startswith("py"):
+                    seg = seg.split("\n", 1)[1] if "\n" in seg else seg
+                if "class " in seg and "BaseMechanism" in seg:
+                    return seg
+            # 退化: 去掉所有 ``` 行
+            return "\n".join(l for l in text.splitlines() if not l.strip().startswith("```"))
+        return text.strip()
+
+    def _last_compile_error(self, draft_code: str, mechanism_name: str) -> str:
+        try:
+            compile(draft_code, f"<mech_{mechanism_name}>", "exec")
+            return ""
+        except SyntaxError as e:
+            return f"SyntaxError: {e.msg} (line {e.lineno})"
+        except Exception as e:  # noqa: BLE001 — 只为生成反馈文本
+            return f"{type(e).__name__}: {e}"
 
     def _locate_target(self, description: str, paper_title: str) -> dict:
         """P7: 用 Harness Handbook 定位编译机制应改进/插入的 ULTRA 代码位置。
