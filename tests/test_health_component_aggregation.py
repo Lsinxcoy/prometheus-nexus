@@ -83,5 +83,8 @@ def test_status_health_consistent_with_compute(monkeypatch):
 
 def test_empty_store_short_circuits(monkeypatch):
     o = _omega()  # 全新临时库, 节点为 0
+    # 显式绑定 node_count=0: 即使 store 是跨测试共享单例(被其他测试写入节点),
+    # 本测试也确定性验证"空库 -> empty"短路逻辑, 不受全局状态泄漏影响
+    monkeypatch.setattr(o.store, "get_node_count", lambda: 0)
     monkeypatch.setattr(o.equilibrium, "get_alert_level", lambda: AlertLevel.GREEN)
     assert o._compute_health() == "empty"
