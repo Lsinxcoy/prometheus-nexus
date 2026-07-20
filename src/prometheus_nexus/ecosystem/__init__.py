@@ -1,0 +1,5 @@
+from prometheus_nexus.ecosystem.lotka_volterra import LotkaVolterra
+from prometheus_nexus.ecosystem.speculative_fork import SpeculativeFork
+from prometheus_nexus.ecosystem.tool_fitness import ToolFitnessPredictor
+from prometheus_nexus.ecosystem.community_tree import CommunityTree
+from prometheus_nexus.ecosystem.edre import EDREReplicator

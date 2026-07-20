@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prometheus Ultra — Neural Lifeform Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/api/v1/dashboard/static/dashboard.css">
+</head>
+<body>
+<div class="dashboard">
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">⬡</div>
+      <div><h1>Prometheus Ultra</h1><span>自进化外挂记忆生命体 · v2.4</span></div>
+    </div>
+    <div class="header-status">
+      <div class="header-stat"><div class="value" id="hdr-nodes">—</div><div class="label">Nodes</div></div>
+      <div class="header-stat"><div class="value" id="hdr-mechs">—</div><div class="label">Mechanisms</div></div>
+      <div class="header-stat"><div class="value" id="hdr-util">—</div><div class="label">Utility</div></div>
+      <div class="header-stat"><div class="value" id="hdr-host">—</div><div class="label">Agent</div></div>
+      <div class="status-pill"><span class="status-dot online" id="hdr-dot"></span><span id="hdr-health-text">—</span></div>
+      <div class="header-stat"><div class="value" id="hdr-uptime">—</div><div class="label">Uptime</div></div>
+      <button class="refresh-btn" onclick="updateAll()">⟳ 刷新</button>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <h3>Navigation</h3>
+    <div class="nav-item active" data-panel="overview" onclick="switchPanel('overview')"><span class="icon">◈</span>总览 Overview</div>
+    <div class="nav-item" data-panel="mechanisms" onclick="switchPanel('mechanisms')"><span class="icon">⚙</span>机制 Mechanisms</div>
+    <div class="nav-item" data-panel="evolution" onclick="switchPanel('evolution')"><span class="icon">⟁</span>进化 Evolution</div>
+    <div class="nav-item" data-panel="memory" onclick="switchPanel('memory')"><span class="icon">▤</span>记忆 Memory</div>
+    <div class="nav-item" data-panel="agents" onclick="switchPanel('agents')"><span class="icon">⧉</span>宿主 Agents</div>
+    <div class="nav-item" data-panel="papers" onclick="switchPanel('papers')"><span class="icon">❖</span>论文借力 Papers</div>
+    <h3>Live Telemetry</h3>
+    <div id="sb-live"></div>
+    <h3>Last Update</h3>
+    <div class="sidebar-metric"><span class="key">time</span><span class="val" id="sb-last-update">—</span></div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Overview -->
+    <section class="panel active" id="panel-overview">
+      <div class="kpi-grid" id="kpi-grid"></div>
+      <div class="card-grid">
+        <div class="card"><div class="card-header"><h2>神经系统 CNS</h2></div><div id="cns-body" class="card-body">—</div></div>
+        <div class="card"><div class="card-header"><h2>大脑皮层 CC</h2></div><div id="cc-body" class="card-body">—</div></div>
+        <div class="card"><div class="card-header"><h2>自主调节 AR</h2></div><div id="ar-body" class="card-body">—</div></div>
+        <div class="card span2"><div class="card-header"><h2>实时遥测 Telemetry</h2></div><div class="chart-container"><canvas id="telemetry-chart"></canvas></div></div>
+      </div>
+    </section>
+
+    <!-- Mechanisms -->
+    <section class="panel" id="panel-mechanisms">
+      <div class="kpi-grid" id="mech-kpi"></div>
+      <div class="card-grid">
+        <div class="card span2"><div class="card-header"><h2>机制状态分布</h2></div><div class="chart-container"><canvas id="mech-chart"></canvas></div></div>
+        <div class="card"><div class="card-header"><h2>叠加态候选</h2></div><div id="superposed-body" class="card-body">—</div></div>
+        <div class="card"><div class="card-header"><h2>机制效用 Top/Bottom</h2></div><div id="effect-body" class="card-body">—</div></div>
+        <div class="card span2"><div class="card-header"><h2>剪枝候选 (负效用机制)</h2></div><div id="prune-body" class="card-body">—</div></div>
+      </div>
+    </section>
+
+    <!-- Evolution -->
+    <section class="panel" id="panel-evolution">
+      <div class="card-grid">
+        <div class="card span2"><div class="card-header"><h2>进化链完整性 (Thought Leap 检测)</h2></div><div id="chain-body" class="card-body">—</div></div>
+        <div class="card span2"><div class="card-header"><h2>进化引擎状态</h2></div><div id="evostats-body" class="card-body">—</div></div>
+        <div class="card"><div class="card-header"><h2>Fitness</h2></div><div class="chart-container"><canvas id="fitness-chart"></canvas></div></div>
+        <div class="card"><div class="card-header"><h2>趋势</h2></div><div class="chart-container"><canvas id="trend-chart"></canvas></div></div>
+      </div>
+    </section>
+
+    <!-- Memory -->
+    <section class="panel" id="panel-memory">
+      <div class="kpi-grid" id="mem-kpi"></div>
+      <div class="card-grid">
+        <div class="card span2"><div class="card-header"><h2>节点类型分布 (多类型知识库)</h2></div><div class="chart-container"><canvas id="type-chart"></canvas></div></div>
+        <div class="card span2"><div class="card-header"><h2>全局效用锚 (D3)</h2></div><div id="util-body" class="card-body">—</div></div>
+      </div>
+    </section>
+
+    <!-- Agents -->
+    <section class="panel" id="panel-agents">
+      <div class="card-grid">
+        <div class="card span2"><div class="card-header"><h2>接入的宿主 Agent</h2></div><div id="agents-body" class="card-body">—</div></div>
+      </div>
+    </section>
+
+    <!-- Papers -->
+    <section class="panel" id="panel-papers">
+      <div class="card-grid">
+        <div class="card span2"><div class="card-header"><h2>六篇论文借力映射</h2></div><div id="papers-body" class="card-body">—</div></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/api/v1/dashboard/static/dashboard.js"></script>
+</body>
+</html>

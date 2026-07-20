@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  omega-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omega-gateway
+    ports:
+      - "9201:9201"
+    volumes:
+      - omega-data:/app/data
+    environment:
+      - OMEGA_HOST=0.0.0.0
+      - OMEGA_PORT=9201
+      - OMEGA_DB_PATH=/app/data/omega.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9201/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  omega-data:
+    driver: local

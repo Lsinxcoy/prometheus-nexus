@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prometheus-ultra"
+version = "1.0.0"
+description = "Prometheus Ultra — 99-mechanism self-evolving AI agent reinforcement system. Fused from Genesis(99), Omega-Omega(90), Z(47)."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    # 多源学术搜索 (PaperSearchConnector) — T4 论文编译轨的原料层
+    # 18+ 学术源(arXiv/PubMed/Semantic Scholar/CrossRef/OpenAlex...)并发 + DOI去重
+    "paper-search-mcp==0.1.4",
+    # 学术搜索可能需要的 HTTP 客户端
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.coverage.run]
+source = ["prometheus_nexus"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85

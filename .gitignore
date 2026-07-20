@@ -1,0 +1,45 @@
+# 仅忽略散落根目录的调试/临时脚本（非 tests/ 下的正式测试）
+# 注意: 无前导 '/' 的 test_*.py 会递归忽略所有子目录的测试文件,
+# 导致 tests/ 下 55+ 正式测试文件无法入版本库 —— 故限制为根目录 /test_*.py
+/debug_*.py
+/test_*.py
+knowledge_graph.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 环境/IDE
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+
+# 运行时产物
+*.db
+*.db-shm
+*.db-wal
+*.json
+.coverage
+
+# 运行时产物(编译/日志)
+archive/compiled/
+wal_logs/
+ultra_9200.log
+monitor_run.log
+monitor_baseline.json
+monitor_run.log
+monitor_A.log
+# 运行时产物 (Nexus)
+nexus_state.json
+nexus_state.json.bak
+archive/nexus.json
+monitor_fine_latest.json
+*.jsonl
+wal_logs/
+*_9200.log
+ultra_start.bat
+nexus_start.bat
+watchdog_9200.py
+feishu_secret.json
