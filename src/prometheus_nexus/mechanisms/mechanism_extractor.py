@@ -110,9 +110,25 @@ class MechanismExtractor:
         self._compiler = compiler  # 复用 T4 的 MechanismCompiler(可选, 延迟构造)
 
     def extract(self, repo_full_name: str) -> ExtractedMechanism | None:
+        """独立扫描入口(非 learn 链路): 自己拉 repo overview 再提取.
+
+        learn 链路应走 extract_from_node(从 store 节点 raw_chunk 取, 不重拉).
+        """
         overview = fetch_repo_overview(repo_full_name)
         if not overview:
             logger.debug("MechanismExtractor: cannot fetch %s", repo_full_name)
+            return None
+        return self.extract_from_overview(overview, repo_full_name)
+
+    def extract_from_overview(self, overview: str, repo_full_name: str) -> ExtractedMechanism | None:
+        """从已有 overview 文本提取机制(单一获取入口: 文本由 learn 存入, 不在此重拉).
+
+        Args:
+            overview: repo README+文件树+源码(来自 store 节点 raw_chunk, learn 时 scanner 拉取)
+            repo_full_name: owner/repo(用于命名/溯源)
+        """
+        if not overview or not overview.strip():
+            logger.debug("MechanismExtractor: empty overview for %s", repo_full_name)
             return None
 
         mechanism_name = repo_full_name.split("/")[-1]
@@ -120,13 +136,18 @@ class MechanismExtractor:
         contract = ""
         gene_specs: dict[str, tuple[float, float]] = {}
 
-        # ---- Step1 学习: 取源码做 AST 提取真实参数 ----
+        # ---- Step1 学习: 从 overview 中解析源码段做 AST 提取真实参数 ----
+        # overview 含 learn 时 scanner 拉的 README + 文件树 + 源码段.
+        # 源码段格式: "# === fn.py ===\n<python code>" — 需先抽取纯代码段再 AST,
+        # 否则 ast.parse 整个 overview(含 README/markdown) 会 SyntaxError.
         files = self._parse_file_list(overview)
         py_files = [f for f in files if f.endswith(".py")][:8]
-        if py_files:
-            source = fetch_repo_source(repo_full_name, py_files)
-            if source:
-                gene_specs = extract_gene_specs_from_source(source)
+        if py_files and "# === " in overview:
+            source_only = self._extract_source_segments(overview)
+            if source_only:
+                gene_specs = extract_gene_specs_from_source(source_only)
+        elif py_files:
+            logger.debug("MechanismExtractor: overview 无源码段, 跳过 AST %s", repo_full_name)
 
         # ---- Step1 学习: LLM 总结机制意图(语义理解, 不产结构) ----
         if self.llm is not None and self.llm.available:
@@ -164,6 +185,23 @@ class MechanismExtractor:
             return []
         return [f.strip() for f in m.group(1).split(",") if f.strip()]
 
+    @staticmethod
+    def _extract_source_segments(overview: str) -> str:
+        """从 overview 抽取 '# === fn.py ===' 标记后的纯 Python 代码段.
+
+        scanner 的 fetch_repo_source 用 '# === {fn} ===\\n' 分隔各文件源码.
+        本方法把这些段拼成纯 Python(去掉 markdown/README), 供 ast.parse.
+        """
+        segments = []
+        parts = overview.split("# === ")
+        for seg in parts[1:]:  # 跳过第一段(README/文件树)
+            # seg 形如 "config.py ===\nLEARNING_RATE = 0.01\n..."
+            if "===\n" in seg:
+                code = seg.split("===\n", 1)[1]
+                # 截到下一个 '# === ' 标记前(split 已处理), 取本段代码
+                segments.append(code)
+        return "\n\n".join(segments)
+
     def is_high_value(self, mech: ExtractedMechanism) -> tuple[bool, float]:
         """高价值过滤: 有可调参数 或 与系统语义相关. 返回 (是否值得提取, 评分)."""
         score = 0.0
@@ -191,23 +229,28 @@ class MechanismExtractor:
         return draft
 
     def extract_from_node(self, node) -> ExtractedMechanism | None:
-        """P3: 从 learn 已吸收的 rail_t3 节点取 url, 提取机制(不重拉源)。
+        """从 learn 已吸收的 rail_t3 节点提取机制(单一获取入口: 只消费 store, 不重拉源).
 
         消费 store 中 NodeType.PROJECT / rail_t3 节点(learn 已吸收 github 项目),
-        直接取 node.url 拉代码, 而非自己重新扫描 github。消除源重复。
+        从 node.raw_chunk 取 README+源码(learn 时 scanner 已拉取存入), 调 extract_from_overview.
+        raw_chunk 空时降级用 content 元数据(不崩, 不重拉外部源).
         """
         if node is None:
             return None
         url = getattr(node, "url", "") or ""
-        if not url:
-            logger.debug("MechanismExtractor: node %s has no url", getattr(node, "id", "?"))
-            return None
-        # url 形如 https://github.com/owner/repo -> owner/repo
-        repo = url.replace("https://github.com/", "").strip("/")
+        repo = ""
+        if url:
+            # url 形如 https://github.com/owner/repo -> owner/repo
+            repo = url.replace("https://github.com/", "").strip("/")
         if not repo or "/" not in repo:
-            logger.debug("MechanismExtractor: invalid github url %s", url)
-            return None
-        return self.extract(repo)
+            logger.debug("MechanismExtractor: invalid github url %s, fallback to node id", url)
+            repo = getattr(node, "id", "unknown/repo")
+        # 单一获取入口: 优先 raw_chunk(README+源码), 降级 content(元数据)
+        overview = getattr(node, "raw_chunk", "") or ""
+        if not overview:
+            overview = getattr(node, "content", "") or ""
+            logger.debug("MechanismExtractor: node %s raw_chunk 空, 降级用 content 元数据", repo)
+        return self.extract_from_overview(overview, repo)
 
     def register_from_node(self, node, registry) -> dict:
         """从节点提取并注册进机制表(不激活)。

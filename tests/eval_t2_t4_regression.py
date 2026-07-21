@@ -114,17 +114,24 @@ def main():
                    if k.startswith("ext_") or k in ("attention_sparsity", "memory_decay")}
         t2_proposals_total = len(t2_like)
 
-        # 4) 测量 T3(从 learn 节点提取 + 编译)
+        # 4) 测量 T3(从 store 节点 raw_chunk 提取, 模拟 learn 已存 README+源码)
         try:
-            ext = o.mechanism_extractor.extract_from_node(_fake_node("https://github.com/owner/awesome-agent"))
+            t3_node = _fake_node(
+                "https://github.com/owner/awesome-agent",
+                raw_chunk=(T3_OVERVIEW))
+            ext = o.mechanism_extractor.extract_from_node(t3_node)
             if ext and ext.gene_specs:
                 t3_specs_total = max(t3_specs_total, len(ext.gene_specs))
         except Exception as e:
             print(f"  t3 err: {e}")
 
-        # 5) 测量 T4(编译论文机制)
+        # 5) 测量 T4(从 store 节点 raw_chunk 编译, 模拟 learn 已存论文全文)
         try:
-            comp = o.mechanism_compiler.compile_from_node(_fake_node("https://arxiv.org/abs/2607.16193"))
+            t4_node = _fake_node(
+                "https://arxiv.org/abs/2607.16193",
+                raw_chunk="We propose a novel sparse attention mechanism. "
+                          "The method reduces complexity. Our approach uses adaptive sparsity.")
+            comp = o.mechanism_compiler.compile_from_node(t4_node)
             if comp is not None and comp.draft_code:
                 t4_compiled += 1
                 # 校验 run() 非空壳
@@ -155,12 +162,27 @@ def main():
     print("RESULT:", "PASS" if ok else "NEEDS_REVIEW")
 
 
-def _fake_node(url):
+def _fake_node(url, raw_chunk="", content=""):
     class _N:
-        def __init__(self, u):
+        def __init__(self, u, rc, ct):
             self.url = u
             self.id = "eval_node"
-    return _N(url)
+            self.raw_chunk = rc
+            self.content = ct or rc[:80]
+    return _N(url, raw_chunk, content)
+
+
+# T3 eval overview: 模拟 learn 时 scanner 拉的 README + 文件树 + 源码段(含 AST 可提取的参数)
+T3_OVERVIEW = (
+    "# owner/awesome-agent\n\n## README\n"
+    "An agent memory evolution repo with adaptive learning.\n\n"
+    "## Top-level files\nmain.py, config.py, README.md\n\n"
+    "# === config.py ===\n"
+    "LEARNING_RATE = 0.01\n"
+    "DROPOUT = 0.3\n"
+    "def train(model, lr: float = 0.005, weight_decay: float = 0.001):\n"
+    "    pass\n"
+)
 
 
 if __name__ == "__main__":

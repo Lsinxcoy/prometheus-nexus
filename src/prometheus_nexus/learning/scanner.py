@@ -50,6 +50,9 @@ class ScanResult:
     url: str = ""
     timestamp: float = 0.0
     source_type: str = ""
+    # 单一获取入口: 高价值源(arxiv/github)的全文/README, 供 T3/T4 编译消费.
+    # 低价值源(wiki/web/rss)留空——摘要已够 T2 语义分析, 不浪费 quota.
+    fulltext: str = ""
     relevance: float = 0.0
 
 
@@ -225,6 +228,18 @@ class KnowledgeScanner:
                     tag = cat.split('term="')[1].split('"')[0]
                     tags.append(tag)
 
+            # 单一获取入口: 对高价值论文拉全文存入 fulltext, 供 T4 编译消费.
+            # 限前 3 篇防超时; 失败静默(降级用摘要 content).
+            fulltext = ""
+            if len(results) < 3:
+                try:
+                    from prometheus_nexus.mechanisms.source_fetcher import fetch_arxiv_fulltext
+                    ft = fetch_arxiv_fulltext(arxiv_id)
+                    if ft:
+                        fulltext = ft
+                except Exception as e:
+                    logger.debug("Scanner: arxiv fulltext fetch failed for %s: %s", arxiv_id, e)
+
             results.append(ScanResult(
                 title=title[:200],
                 content=summary[:500],
@@ -234,6 +249,7 @@ class KnowledgeScanner:
                 url=f"https://arxiv.org/abs/{arxiv_id}",
                 timestamp=time.time(),
                 source_type="paper",
+                fulltext=fulltext,
             ))
         return results
 
@@ -298,6 +314,19 @@ class KnowledgeScanner:
 
         results = []
         for repo in data["items"][:max_results]:
+            repo_full = repo.get("full_name", "")
+            # 单一获取入口: 对高价值 repo 拉 README+文件树存入 fulltext, 供 T3 提取消费.
+            # 限前 3 个防超时; 失败静默(降级用元数据 content).
+            fulltext = ""
+            if len(results) < 3 and repo_full:
+                try:
+                    from prometheus_nexus.mechanisms.source_fetcher import fetch_repo_overview
+                    ft = fetch_repo_overview(repo_full)
+                    if ft:
+                        fulltext = ft
+                except Exception as e:
+                    logger.debug("Scanner: github overview fetch failed for %s: %s", repo_full, e)
+
             results.append(ScanResult(
                 title=f"{repo['full_name']}: {repo.get('description', '')[:100]}",
                 content=f"Language: {repo.get('language', 'N/A')}. "
@@ -310,6 +339,7 @@ class KnowledgeScanner:
                 url=repo.get("html_url", ""),
                 timestamp=time.time(),
                 source_type="project",
+                fulltext=fulltext,
             ))
         return results
 

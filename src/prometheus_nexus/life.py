@@ -1252,7 +1252,8 @@ class Omega:
     def remember(self, content: str, utility: float = 0.5, tags: list[str] | None = None,
                  branch: str = "main", trust_level: str = "fact",
                  node_type: NodeType = NodeType.FACT, url: str = "",
-                 bypass_dopamine: bool = False) -> str:
+                 bypass_dopamine: bool = False,
+                 raw_chunk: str = "") -> str:
         # 管道运行计数(监控可见性)
         try:
             self.nexus._pipelines.setdefault("remember", {"runs": 0, "failures": 0, "last_run": None})
@@ -1349,9 +1350,10 @@ class Omega:
                 return ""
 
         # Create node
+        # 单一获取入口: raw_chunk 存全文/README(供 T3/T4 编译), 缺省回退 content(原 Verbatim 行为)
         node = Node(id=generate_uuidv7(), type=node_type, content=content,
                      tags=tags, utility=utility, surprise=surprise, branch=branch,
-                     raw_chunk=content, trust_state="has", url=url)  # Verbatim chunk + PolarMem HAS + 源URL
+                     raw_chunk=(raw_chunk or content), trust_state="has", url=url)
 
         # EVAF: surprise-valence consolidation check
         evaf_result = self.evaf_consolidation.evaluate(node.id, surprise, utility)
@@ -3384,7 +3386,8 @@ class Omega:
                 node_id = self.remember(content=f"{r.title}: {r.content}",
                                         utility=base_u, tags=node_tags,
                                         node_type=ntype, url=getattr(r, "url", ""),
-                                        bypass_dopamine=True)
+                                        bypass_dopamine=True,
+                                        raw_chunk=getattr(r, "fulltext", ""))
             finally:
                 self._active_event_id = _eid_prev
             if node_id:

@@ -63,9 +63,27 @@ class MechanismCompiler:
         os.makedirs(self.compiled_dir, exist_ok=True)
 
     def compile(self, arxiv_id: str, paper_title: str = "") -> CompiledMechanism | None:
+        """独立扫描入口(非 learn 链路): 自己拉 arxiv 全文再编译.
+
+        learn 链路应走 compile_from_node(从 store 节点 raw_chunk 取全文, 不重拉).
+        """
         fulltext = fetch_arxiv_fulltext(arxiv_id)
         if not fulltext:
             logger.debug("MechanismCompiler: no fulltext for %s", arxiv_id)
+            return None
+        return self.compile_from_text(fulltext, arxiv_id, paper_title)
+
+    def compile_from_text(self, fulltext: str, arxiv_id: str,
+                          paper_title: str = "") -> CompiledMechanism | None:
+        """从已有全文编译机制(单一获取入口: 全文由 learn 存入, 不在此重拉).
+
+        Args:
+            fulltext: 论文全文(来自 store 节点 raw_chunk, 由 learn 时 scanner 拉取)
+            arxiv_id: 论文 ID(用于命名/溯源)
+            paper_title: 论文标题
+        """
+        if not fulltext or not fulltext.strip():
+            logger.debug("MechanismCompiler: empty fulltext for %s", arxiv_id)
             return None
 
         mechanism_name = f"paper_{arxiv_id.split('/')[-1].replace('.', '_')}"
@@ -73,8 +91,7 @@ class MechanismCompiler:
         draft_code = ""
 
         if self.llm is not None and self.llm.available:
-            # P7 方向2: BGPD 三级渐进披露 — 先高层行为, 再模块, 最后具体函数
-            # 论文证明用更少 token 达到更好定位. 这里把"机制提取"也分三级.
+            # P7 方向2: BGPD 三级渐进披露 - 先高层行为, 再模块, 最后具体函数
             prompt = (
                 f"从论文提取核心机制, 分三级输出(Behavior-Guided Progressive Disclosure):\n"
                 f"L1_BEHAVIOR: <该机制对应 agent 的哪类高层行为, 如'参数进化'/'语义记忆'/'工具调用'>\n"
@@ -85,25 +102,22 @@ class MechanismCompiler:
             out = self.llm.complete(prompt, system="你是机制编译器(三级渐进)")
             if out:
                 description = out
-                # 编译校验 + LLM 自修正循环: 劣质草案(全角噪音/非合法类)不过编译,
-                # 不挂载为候选。把 SyntaxError 反馈给 LLM 重生成, 直到编译通过且是
-                # 合法 BaseMechanism 子类。最多 MAX_DRAFT_FIX 次, 仍失败则丢弃(不降级为占位)。
+                # 编译校验 + LLM 自修正循环
                 draft_code = self._compile_draft_with_fix(
                     out, mechanism_name, system="你是机制编译器(三级渐进)",
                     paper_context=f"论文: {paper_title}\n{fulltext[:4000]}",
                 )
                 if not draft_code:
-                    logger.warning("MechanismCompiler: LLM draft 无法编译通过, 丢弃(不挂载劣质草案) %s", mechanism_name)
+                    logger.warning("MechanismCompiler: LLM draft 无法编译通过, 丢弃 %s", mechanism_name)
                     return None
         else:
-            # 降级(P2a): 无 LLM 时规则提取, 但 draft 不能是纯 stub 空壳 —
-            # 至少含机制描述 + target_location(若已定位) + 人工 apply 指令, 让激活后仍有意义.
+            # 降级(P2a): 无 LLM 时规则提取
             proposals = re.findall(r"(?:we propose|our method|algorithm \d+|our approach)[^\n.]{0,120}", fulltext, re.I)
             description = f"从 {arxiv_id} 提取: " + " | ".join(proposals[:3])
             tl = self._locate_target(description, paper_title)
             tl_repr = repr(tl) if tl else "{}"
             draft_code = (
-                f"# DRAFT (rule-extracted, no LLM — requires human review)\n"
+                f"# DRAFT (rule-extracted, no LLM - requires human review)\n"
                 f"# paper: {arxiv_id} {paper_title}\n"
                 f"# target_location: {tl_repr}\n"
                 f"# apply: 经 P7 行为定位确认位置后, 由宿主/A-B 验证落地, 非自动直替\n"
@@ -118,7 +132,7 @@ class MechanismCompiler:
                 f"        return {{'ok': False, 'note': 'rule-extracted draft, awaiting LLM/human implementation'}}\n"
             )
 
-        # P7 方向1: 行为定位 — 编译出机制后, 用 Harness Handbook 定位应改进/插入的代码位置
+        # P7 方向1: 行为定位
         target_location = self._locate_target(description, paper_title)
 
         # 存草稿文件
@@ -300,24 +314,29 @@ class MechanismCompiler:
         return {}
 
     def compile_from_node(self, node) -> CompiledMechanism | None:
-        """P3: 从 learn 已吸收的 rail_t4 节点取 url, 编译机制(不重拉源)。
+        """从 learn 已吸收的 rail_t4 节点编译机制(单一获取入口: 只消费 store, 不重拉源).
 
         消费 store 中 NodeType.PAPER / rail_t4 节点(learn 已吸收论文),
-        直接取 node.url 中的 arxiv_id 拉全文, 而非自己重新扫描 arxiv。消除源重复。
+        从 node.raw_chunk 取全文(learn 时 scanner 已拉取存入), 调 compile_from_text.
+        raw_chunk 空时降级用 content 摘要(不崩, 不重拉外部源).
         """
         if node is None:
             return None
         url = getattr(node, "url", "") or ""
-        if not url:
-            logger.debug("MechanismCompiler: node %s has no url", getattr(node, "id", "?"))
-            return None
-        # url 形如 https://arxiv.org/abs/2401.12345 -> 2401.12345
-        arxiv_id = url.replace("https://arxiv.org/abs/", "").strip("/")
+        arxiv_id = ""
+        if url:
+            # url 形如 https://arxiv.org/abs/2401.12345 -> 2401.12345
+            arxiv_id = url.replace("https://arxiv.org/abs/", "").strip("/")
         if not arxiv_id or "." not in arxiv_id:
-            logger.debug("MechanismCompiler: invalid arxiv url %s", url)
-            return None
+            logger.debug("MechanismCompiler: invalid arxiv url %s, fallback to node id", url)
+            arxiv_id = getattr(node, "id", "unknown")
         title = getattr(node, "content", "")[:80]
-        return self.compile(arxiv_id, title)
+        # 单一获取入口: 优先 raw_chunk(全文), 降级 content(摘要)
+        fulltext = getattr(node, "raw_chunk", "") or ""
+        if not fulltext:
+            fulltext = getattr(node, "content", "") or ""
+            logger.debug("MechanismCompiler: node %s raw_chunk 空, 降级用 content 摘要", arxiv_id)
+        return self.compile_from_text(fulltext, arxiv_id, title)
 
     def register_from_node(self, node, registry, paper_title: str = "") -> dict:
         """从节点编译并注册进机制表(status=compiled, 不激活)。
