@@ -270,3 +270,45 @@ class CAMPAssembler:
             score += 0.2
 
         return round(min(score, 1.0), 4)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 架构优化 P1: 声明式接入适配器 (2026-07-23)
+# 原 CAMPAssembler 实现完整但零实例化零调用(死代码)。本适配器继承
+# BaseMechanism, 委托原 assemble/vote, 声明 auto_wire=True + phase=REASON,
+# 使上帝(Omega)可经 registry/wiring 按阶段声明式调度, 无需改 life.py 5333 行。
+# 原类实现零改动 — 保留已验证逻辑。
+# ─────────────────────────────────────────────────────────────────────────────
+from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism, Phase
+
+
+class CAMPMechanism(BaseMechanism):
+    """CAMP 动态组装+三值投票的声明式接入适配器."""
+
+    name = "camp_assembly"
+    description = "Case-Adaptive Multi-agent deliberation with three-value voting (arXiv 2604.00085)"
+    category = "collaboration"
+    phase = Phase.REASON          # 审议/推理阶段调度
+    hooks_into = "post_reason"
+    auto_wire = True
+
+    def __init__(self):
+        super().__init__()
+        self._inner = CAMPAssembler()
+
+    def run(self, context: dict | None = None) -> dict:
+        """context: {"task": {...}, "proposals": [...]}.
+
+        Returns: {ok, panel, vote, coverage}.
+        """
+        ctx = context or {}
+        task = ctx.get("task", {"type": "general", "description": "", "domain": ""})
+        proposals = ctx.get("proposals", [])
+        panel = self._inner.assemble(task)
+        vote = self._inner.vote(panel.get("panel", []), proposals) if proposals else None
+        return {
+            "ok": True,
+            "panel": panel,
+            "vote": vote,
+            "coverage": panel.get("coverage", 0.0),
+        }

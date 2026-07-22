@@ -456,3 +456,40 @@ class ReasoningAlignmentChecker:
             ),
             "gdp_sessions": len(self._gdp_sessions),
         }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 架构优化 P1: 声明式接入适配器 (2026-07-23)
+# 原 ReasoningAlignmentChecker 实现完整但零调用(死代码)。本适配器继承
+# BaseMechanism, 委托原 check_alignment, 声明 auto_wire=True + phase=REASON,
+# 使上帝(Omega)可经 registry/wiring 按阶段声明式调度, 无需改 life.py 5333 行。
+# 原类实现零改动 — 保留已验证逻辑。
+# ─────────────────────────────────────────────────────────────────────────────
+from prometheus_nexus.mechanisms.base_mechanism import BaseMechanism, Phase
+
+
+class CARAMechanism(BaseMechanism):
+    """CARA 推理对齐检测的声明式接入适配器."""
+
+    name = "cara_alignment"
+    description = "Consistency-Aware Reasoning Alignment (arXiv 2606.08457) — 检测多路径推理一致性幻觉"
+    category = "safety"
+    phase = Phase.REASON          # 推理后阶段调度
+    hooks_into = "post_reason"
+    auto_wire = True
+
+    def __init__(self, kappa_threshold: float = 0.5, similarity_threshold: float = 0.6):
+        super().__init__()
+        self._inner = ReasoningAlignmentChecker(
+            kappa_threshold=kappa_threshold, similarity_threshold=similarity_threshold
+        )
+
+    def run(self, context: dict | None = None) -> dict:
+        """context: {"paths": [{"answer","reasoning","agent"}, ...]}.
+
+        Returns: 原 check_alignment 结果 + ok 字段(符合 BaseMechanism 契约).
+        """
+        paths = (context or {}).get("paths", [])
+        result = self._inner.check_alignment(paths)
+        result["ok"] = True
+        return result
