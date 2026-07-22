@@ -48,6 +48,16 @@ from prometheus_nexus.foundation.schema import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class BatchWriteResult:
+    """批量写结果 (create_nodes_batch 返回)."""
+
+    success: bool
+    created: int = 0
+    failed: list[dict] = field(default_factory=list)
+    write_ids: list[str] = field(default_factory=list)
+
+
 # ============================================================
 # Data Classes
 # ============================================================
@@ -471,6 +481,100 @@ class MinervaStore:
             except sqlite3.Error as e:
                 logger.error("read_node failed for %s: %s", node_id, e)
                 return None
+
+    def create_nodes_batch(
+        self,
+        nodes: list[Node],
+        tokens: dict[str, WriteToken] | None = None,
+    ) -> "BatchWriteResult":
+        """批量创建节点 — 单锁 / 单事务 / executemany。
+
+        架构优化 P0 (2026-07-23): 232 机制在 remember 循环里逐条 create_node,
+        每条独立抢锁 + 独立 commit(WAL 单写者下 commit 的 fsync 是主瓶颈)。
+        批量接口把 N 次 锁获取+事务提交 压成 1 次, 吞吐近似线性提升,
+        且不改变单锁串行语义(零风险)。
+
+        Args:
+            nodes: 节点列表
+            tokens: 可选 {node_id: WriteToken} 逐节点 CAS 令牌
+
+        Returns:
+            BatchWriteResult: {success, created, failed:[{id,reason}], write_ids}
+        """
+        self._check_connection()
+        assert self._conn is not None
+
+        valid: list[Node] = []
+        failed: list[dict] = []
+        # 锁外逐条校验(校验不持锁, 减少持锁时间)
+        for node in nodes:
+            if not node.id:
+                failed.append({"id": getattr(node, "id", ""), "reason": "Node ID required"})
+                continue
+            if not node.content:
+                failed.append({"id": node.id, "reason": "Content required"})
+                continue
+            if node.utility < 0 or node.utility > 1:
+                failed.append({"id": node.id, "reason": f"Utility {node.utility} out of [0,1]"})
+                continue
+            tk = (tokens or {}).get(node.id)
+            if tk is not None and not tk.is_valid():
+                failed.append({"id": node.id, "reason": "Write token expired"})
+                continue
+            valid.append(node)
+
+        if not valid:
+            return BatchWriteResult(success=False, created=0, failed=failed, write_ids=[])
+
+        write_ids: list[str] = []
+        created = 0
+        with self._lock:
+            try:
+                node_rows = [
+                    (n.id, n.type.value, n.content, n.utility, n.surprise,
+                     json.dumps(n.tags), n.branch, n.source.value, n.confidence,
+                     n.tier.value, n.access_count, n.created_at, n.updated_at,
+                     n.tx_from, n.tx_to, n.version, n.raw_chunk, n.trust_state, n.url)
+                    for n in valid
+                ]
+                fts_rows = [(n.id, n.content, json.dumps(n.tags), "[]", None, n.branch) for n in valid]
+                self._conn.executemany(
+                    "INSERT INTO nodes (id, type, content, utility, surprise, tags,"
+                    " branch, source, confidence, tier, access_count,"
+                    " created_at, updated_at, tx_from, tx_to, version, raw_chunk, trust_state, url)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    node_rows,
+                )
+                try:
+                    self._conn.executemany(
+                        "INSERT INTO nodes_fts (id, content, tags, entity_ids, creator_agent, branch)"
+                        " VALUES (?,?,?,?,?,?)",
+                        fts_rows,
+                    )
+                except sqlite3.OperationalError as e:
+                    logger.warning("FTS bulk insert skipped: %s", e)
+                for n in valid:
+                    wid = generate_uuidv7()
+                    self._conn.execute(
+                        "INSERT INTO write_log (write_id, node_id, operator, token, committed_at, state)"
+                        " VALUES (?,?,?,?,?,?)",
+                        (wid, n.id, "BULK_CREATE", None, time.time(), "COMMITTED"),
+                    )
+                    write_ids.append(wid)
+                self._conn.commit()
+                created = len(valid)
+                return BatchWriteResult(success=True, created=created, failed=failed, write_ids=write_ids)
+            except sqlite3.IntegrityError as e:
+                self._conn.rollback()
+                return BatchWriteResult(success=False, created=0,
+                                        failed=failed + [{"id": "*", "reason": f"Integrity: {e}"}],
+                                        write_ids=[])
+            except sqlite3.Error as e:
+                self._conn.rollback()
+                logger.error("create_nodes_batch failed: %s", e)
+                return BatchWriteResult(success=False, created=0,
+                                        failed=failed + [{"id": "*", "reason": f"DB: {e}"}],
+                                        write_ids=[])
 
     def update_node(self, node: Node, token: WriteToken | None = None) -> WriteResult:
         """Update an existing node.

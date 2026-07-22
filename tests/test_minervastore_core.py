@@ -194,3 +194,70 @@ def test_search_finds_content(store: MinervaStore):
     store.create_node(_mk_node("n1", content="neural networks evolve through gradient descent"))
     hits = store.search("gradient")
     assert any(h.id == "n1" for h in hits)
+
+
+# ===================================================================
+# 批量写接口 (P0 并发优化)
+# ===================================================================
+
+
+def test_create_nodes_batch_basic(store: MinervaStore):
+    nodes = [_mk_node(f"b{i}", content=f"batch content {i}") for i in range(20)]
+    r = store.create_nodes_batch(nodes)
+    assert r.success is True
+    assert r.created == 20
+    assert store.get_node_count() == 20
+
+
+def test_create_nodes_batch_partial_validation(store: MinervaStore):
+    good = _mk_node("ok1", content="good")
+    bad = _mk_node("bad1", content="")
+    r = store.create_nodes_batch([good, bad])
+    # 合法的成功, 非法被挑出
+    assert r.created == 1
+    assert len(r.failed) == 1
+    assert r.failed[0]["id"] == "bad1"
+
+
+def test_create_nodes_batch_cas_rejects_expired(store: MinervaStore):
+    import time
+
+    n = _mk_node("n1", content="x")
+    token = WriteToken(
+        token="t", node_id="n1", operator="BULK_CREATE",
+        granted_at=time.time() - 100, expires_at=time.time() - 50,
+    )
+    r = store.create_nodes_batch([n], tokens={"n1": token})
+    assert r.created == 0
+    assert any("expired" in f["reason"] for f in r.failed)
+
+
+def test_batch_vs_loop_throughput(store: MinervaStore):
+    """实证: 批量写吞吐显著优于逐条写 (同数据量, 单连接单锁下 commit fsync 摊薄)."""
+    import time as _t
+
+    N = 200
+    # 逐条
+    singles = [_mk_node(f"s{i}", content=f"single {i}") for i in range(N)]
+    t0 = _t.perf_counter()
+    for n in singles:
+        store.create_node(n)
+    loop_dt = _t.perf_counter() - t0
+
+    # 批量 (新 store 避免主键冲突)
+    import os, tempfile
+
+    fd, p2 = tempfile.mkstemp(suffix=".db")
+    os.close(fd); os.remove(p2)
+    cfg2 = ZConfig(database_path=p2)
+    s2 = MinervaStore(cfg2); s2.connect()
+    batch_nodes = [_mk_node(f"s{i}", content=f"single {i}") for i in range(N)]
+    t1 = _t.perf_counter()
+    s2.create_nodes_batch(batch_nodes)
+    batch_dt = _t.perf_counter() - t1
+    s2.close(); os.remove(p2)
+
+    # 批量应明显更快 (commit 次数 200→1)
+    assert batch_dt < loop_dt, f"batch {batch_dt:.3f}s not faster than loop {loop_dt:.3f}s"
+    # 记录证据(不 assert 具体倍数, 避免环境噪声误判)
+    print(f"\n[throughput] N={N} loop={loop_dt*1000:.1f}ms batch={batch_dt*1000:.1f}ms speedup={loop_dt/batch_dt:.1f}x")
