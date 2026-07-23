@@ -55,6 +55,32 @@ class BaseMechanism(abc.ABC):
     def __init__(self):
         self.fitness: float = 0.0
         self.invoke_count: int = 0
+        # 机制级运行时指标 (架构优化 P2: 遥测地基)
+        # 由 wiring.run_phase 自动填充, 机制作者无需手改
+        self._metrics: dict = {
+            "total_latency_ms": 0.0,   # 累计运行延迟
+            "call_count": 0,           # 被调度次数(含经 wiring)
+            "error_count": 0,          # 运行异常次数
+            "last_latency_ms": 0.0,    # 最近一次延迟
+            "last_error": None,        # 最近一次异常信息
+        }
+
+    def record_latency(self, ms: float) -> None:
+        """记录一次运行延迟 (由 wiring.run_phase 自动调用)."""
+        self._metrics["total_latency_ms"] += ms
+        self._metrics["last_latency_ms"] = ms
+        self._metrics["call_count"] += 1
+
+    def record_error(self, exc: Exception) -> None:
+        """记录一次运行异常."""
+        self._metrics["error_count"] += 1
+        self._metrics["last_error"] = str(exc)
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """平均延迟. 无调用返回 0."""
+        c = self._metrics["call_count"]
+        return self._metrics["total_latency_ms"] / c if c else 0.0
 
     @abc.abstractmethod
     def run(self, context: dict | None = None) -> dict:
@@ -76,4 +102,12 @@ class BaseMechanism(abc.ABC):
             "phase": self.phase,
             "hooks_into": self.hooks_into,
             "auto_wire": self.auto_wire,
+            "metrics": {
+                "total_latency_ms": round(self._metrics["total_latency_ms"], 3),
+                "call_count": self._metrics["call_count"],
+                "error_count": self._metrics["error_count"],
+                "avg_latency_ms": round(self.avg_latency_ms, 3),
+                "last_latency_ms": round(self._metrics["last_latency_ms"], 3),
+                "last_error": self._metrics["last_error"],
+            },
         }

@@ -131,18 +131,33 @@ def run_phase(registry: Any, phase: str, context: dict | None = None) -> list[di
     异常隔离: 单个机制失败不影响同阶段其它机制(与 registry.invoke 一致).
     仅对声明了 run() 且 auto_wire 的机制生效.
 
+    自动遥测(架构优化 P2): 每个机制运行前后自动记录 latency/error 到
+    inst._metrics, 经 meta() 暴露, 使上帝看得见每个器官的耗费.
+
     Returns:
         list[dict]: 每个元素 {name, ok, result?}
     """
+    import time
+
     results: list[dict] = []
     for inst in collect_phase_handlers(registry, phase):
         name = getattr(inst, "name", "unnamed")
+        t0 = time.perf_counter()
         try:
             res = inst.run(context or {})
             ok = bool(res.get("ok", True)) if isinstance(res, dict) else True
             inst.invoke_count += 1
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            if hasattr(inst, "record_latency"):
+                inst.record_latency(dt_ms)
             results.append({"name": name, "ok": ok, "result": res})
         except Exception as exc:  # 异常隔离, 不阻断主流程
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            # 异常也是一次调用: 先记延迟, 再记错误
+            if hasattr(inst, "record_latency"):
+                inst.record_latency(dt_ms)
+            if hasattr(inst, "record_error"):
+                inst.record_error(exc)
             logger.warning("wiring.run_phase(%s): %s raised %s", phase, name, exc)
             results.append({"name": name, "ok": False, "error": str(exc)})
     return results

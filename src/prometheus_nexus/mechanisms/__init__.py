@@ -7,6 +7,11 @@ from prometheus_nexus.mechanisms.wiring import (
     build_plan,
     run_phase,
 )
+from prometheus_nexus.mechanisms.metrics import (
+    MetricsSnapshot,
+    collect_registry_metrics,
+    export_prometheus_format,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -19,6 +24,9 @@ __all__ = [
     "collect_hooks",
     "build_plan",
     "run_phase",
+    "MetricsSnapshot",
+    "collect_registry_metrics",
+    "export_prometheus_format",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
