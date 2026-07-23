@@ -4881,6 +4881,31 @@ class Omega:
             details=details,
         )
 
+    def mechanism_telemetry(self) -> dict:
+        """机制级遥测快照 (架构优化 P2 接入点).
+
+        返回 collect_registry_metrics(self.mechanism_registry) 的聚合 dict,
+        含每个机制的 latency/calls/errors/按 category 汇总。使上帝(Omega)
+        能向外暴露"每个器官的耗费" — 你叫 Prometheus 却长期无运行时机制指标。
+
+        零侵入: 不改动 status()/主循环逻辑, 仅新增只读查询方法。
+        若 mechanism_registry 未初始化, 返回空快照(降级不崩)。
+
+        Returns:
+            dict: {total_mechanisms, auto_wired, total_calls, total_errors,
+                   total_latency_ms, by_category, mechanisms[]}
+        """
+        from prometheus_nexus.mechanisms.metrics import collect_registry_metrics
+
+        reg = getattr(self, "mechanism_registry", None)
+        if reg is None:
+            return {
+                "total_mechanisms": 0, "auto_wired": 0, "total_calls": 0,
+                "total_errors": 0, "total_latency_ms": 0.0,
+                "by_category": {}, "mechanisms": [],
+            }
+        return collect_registry_metrics(reg).to_dict()
+
     # 组件健康探针表: (属性名, 方法路径)。status() 与 _compute_health() 共用,
     # 避免重复采集逻辑。任一组件缺失/抛错都被记入 failed, 供健康聚合判定降级。
     COMPONENT_HEALTH_PROBES = [
