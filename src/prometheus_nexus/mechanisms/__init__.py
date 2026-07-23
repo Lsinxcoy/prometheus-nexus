@@ -19,6 +19,10 @@ from prometheus_nexus.mechanisms.intent import (
 from prometheus_nexus.mechanisms.retrieval import (
     annotate_trust,
 )
+from prometheus_nexus.mechanisms.safety_utils import (
+    detect_jailbreak,
+    DEFAULT_MALICIOUS_PHRASES,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -37,6 +41,8 @@ __all__ = [
     "classify_intent",
     "extract_tool_calls",
     "annotate_trust",
+    "detect_jailbreak",
+    "DEFAULT_MALICIOUS_PHRASES",
     "XMemoryAdapter",
     "YBankAdapter",
 ]

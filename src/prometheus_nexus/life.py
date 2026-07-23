@@ -5255,12 +5255,15 @@ class Omega:
             return []
 
     def _detect_jailbreak(self) -> dict | None:
-        """Detect potential jailbreak attempt."""
-        malicious_phrases = ["ignore previous instructions", "forget everything", "system prompt", "disregard rules"]
-        for phrase in malicious_phrases:
-            if phrase.lower() in "".join([n.content for n in self.store.get_active_nodes(limit=20)]).lower():
-                return {"type": "jailbreak", "phrase": phrase}
-        return None
+        """Detect potential jailbreak attempt. 外置于 mechanisms.safety_utils.detect_jailbreak."""
+        try:
+            text = "".join([n.content for n in self.store.get_active_nodes(limit=20)])
+        except Exception as e:
+            logger.warning("Omega._detect_jailbreak: store read failed: %s", e)
+            return None
+        from prometheus_nexus.mechanisms.safety_utils import detect_jailbreak
+
+        return detect_jailbreak(text)
 
     def _collect_multi_agent_reasonings(self) -> list[dict]:
         """Collect multi-agent reasonings for CARA alignment check."""
