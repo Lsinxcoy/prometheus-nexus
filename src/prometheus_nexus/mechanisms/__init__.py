@@ -23,6 +23,13 @@ from prometheus_nexus.mechanisms.safety_utils import (
     detect_jailbreak,
     DEFAULT_MALICIOUS_PHRASES,
 )
+from prometheus_nexus.mechanisms.store_stats import (
+    collect_reasoning_chain,
+    collect_multi_agent_reasonings,
+    collect_recent_trajectory,
+    collect_recent_actions,
+    compute_success_rate,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -43,6 +50,11 @@ __all__ = [
     "annotate_trust",
     "detect_jailbreak",
     "DEFAULT_MALICIOUS_PHRASES",
+    "collect_reasoning_chain",
+    "collect_multi_agent_reasonings",
+    "collect_recent_trajectory",
+    "collect_recent_actions",
+    "compute_success_rate",
     "XMemoryAdapter",
     "YBankAdapter",
 ]

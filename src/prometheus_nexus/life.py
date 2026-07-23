@@ -5246,10 +5246,10 @@ class Omega:
         return classify_intent(query)
 
     def _get_reasoning_chain(self) -> list[str]:
-        """Get recent reasoning chain for MCTS retriever."""
+        """Get recent reasoning chain for MCTS retriever. 外置于 mechanisms.store_stats."""
         try:
-            nodes = self.store.get_active_nodes(limit=10)
-            return [n.content[:100] for n in nodes[:5]]
+            from prometheus_nexus.mechanisms.store_stats import collect_reasoning_chain
+            return collect_reasoning_chain(self.store.get_active_nodes(limit=10))
         except Exception as e:
             logger.warning("Omega._get_reasoning_chain: store read failed: %s", e)
             return []
@@ -5266,19 +5266,19 @@ class Omega:
         return detect_jailbreak(text)
 
     def _collect_multi_agent_reasonings(self) -> list[dict]:
-        """Collect multi-agent reasonings for CARA alignment check."""
+        """Collect multi-agent reasonings for CARA alignment check. 外置于 store_stats."""
         try:
-            nodes = self.store.get_active_nodes(limit=10)
-            return [{"reasoning": n.content[:200], "confidence": n.utility} for n in nodes[:5]]
+            from prometheus_nexus.mechanisms.store_stats import collect_multi_agent_reasonings
+            return collect_multi_agent_reasonings(self.store.get_active_nodes(limit=10))
         except Exception as e:
             logger.warning("Omega._collect_multi_agent_reasonings: store read failed: %s", e)
             return []
 
     def _get_recent_trajectory(self) -> list[dict]:
-        """Get recent trajectory for COMPASS audit."""
+        """Get recent trajectory for COMPASS audit. 外置于 store_stats."""
         try:
-            nodes = self.store.get_active_nodes(limit=20)
-            return [{"node_id": n.id, "content": n.content[:100], "utility": n.utility} for n in nodes]
+            from prometheus_nexus.mechanisms.store_stats import collect_recent_trajectory
+            return collect_recent_trajectory(self.store.get_active_nodes(limit=20))
         except Exception as e:
             logger.warning("Omega._get_recent_trajectory: store read failed: %s", e)
             return []
@@ -5293,22 +5293,19 @@ class Omega:
             return []
 
     def _get_recent_actions(self) -> list[dict]:
-        """Get recent actions for StrategySwitcher."""
+        """Get recent actions for StrategySwitcher. 外置于 store_stats."""
         try:
-            nodes = self.store.get_active_nodes(limit=10)
-            return [{"action": "remember", "success": n.utility > 0.5} for n in nodes]
+            from prometheus_nexus.mechanisms.store_stats import collect_recent_actions
+            return collect_recent_actions(self.store.get_active_nodes(limit=10))
         except Exception as e:
             logger.warning("Omega._get_recent_actions: store read failed: %s", e)
             return []
 
     def _compute_success_rate(self) -> float:
-        """Compute success rate for StrategySwitcher."""
+        """Compute success rate for StrategySwitcher. 外置于 store_stats."""
         try:
-            nodes = self.store.get_active_nodes(limit=50)
-            if not nodes:
-                return 0.5
-            successful = sum(1 for n in nodes if n.utility > 0.6)
-            return successful / len(nodes)
+            from prometheus_nexus.mechanisms.store_stats import compute_success_rate
+            return compute_success_rate(self.store.get_active_nodes(limit=50))
         except Exception as e:
             logger.warning("Omega._compute_success_rate: success-rate read failed: %s", e)
             return 0.5
