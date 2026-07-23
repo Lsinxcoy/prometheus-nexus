@@ -5284,10 +5284,10 @@ class Omega:
             return []
 
     def _collect_failure_paths(self) -> list[str]:
-        """Collect failure paths for ReflectiveSampler."""
+        """Collect failure paths for ReflectiveSampler. 外置于 mechanisms.failure_stats."""
         try:
-            failures = self.failure_log.get_recent_failures(10)
-            return [f.get("action", "") for f in failures if f.get("action")]
+            from prometheus_nexus.mechanisms.failure_stats import collect_failure_paths
+            return collect_failure_paths(self.failure_log.get_recent_failures(10))
         except Exception as e:
             logger.warning("Omega._collect_failure_paths: failure_log read failed: %s", e)
             return []
@@ -5311,11 +5311,10 @@ class Omega:
             return 0.5
 
     def _get_failed_trajectory(self) -> dict:
-        """Get failed trajectory for L-ICL correction."""
+        """Get failed trajectory for L-ICL correction. 外置于 mechanisms.failure_stats."""
         try:
-            failures = self.failure_log.get_recent_failures(5)
-            if failures:
-                return failures[0]
+            from prometheus_nexus.mechanisms.failure_stats import get_failed_trajectory
+            return get_failed_trajectory(self.failure_log.get_recent_failures(5))
         except Exception as e:
             logger.warning("Omega._get_failed_trajectory: failure_log read failed: %s", e)
-        return {"trajectory": [], "state": {}}
+            return {"trajectory": [], "state": {}}

@@ -30,6 +30,10 @@ from prometheus_nexus.mechanisms.store_stats import (
     collect_recent_actions,
     compute_success_rate,
 )
+from prometheus_nexus.mechanisms.failure_stats import (
+    collect_failure_paths,
+    get_failed_trajectory,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -55,6 +59,8 @@ __all__ = [
     "collect_recent_trajectory",
     "collect_recent_actions",
     "compute_success_rate",
+    "collect_failure_paths",
+    "get_failed_trajectory",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
