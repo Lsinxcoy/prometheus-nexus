@@ -5261,26 +5261,16 @@ class Omega:
     # Helper methods for integrated modules
     # ============================================================
     def _extract_tool_calls(self, content: str) -> list[dict]:
-        """Extract tool calls from content string."""
-        try:
-            import re
-            pattern = r'\{[^}]*"action":\s*"([^"]+)"[^}]*\}'
-            matches = re.findall(pattern, content)
-            return [{"expected_params": {}, "actual_params": {}} for _ in matches[:5]]
-        except Exception as e:
-            logger.warning("Omega._extract_tool_calls: enrichment read failed: %s", e)
-            return []
+        """Extract tool calls from content string. 外置于 mechanisms.intent.extract_tool_calls."""
+        from prometheus_nexus.mechanisms.intent import extract_tool_calls
+
+        return extract_tool_calls(content)
 
     def _classify_intent(self, query: str) -> str:
-        """Classify user intent for SimpleMem retrieval."""
-        query_lower = query.lower()
-        if any(kw in query_lower for kw in ["how", "what", "why", "explain"]):
-            return "explanation"
-        if any(kw in query_lower for kw in ["search", "find", "look up"]):
-            return "retrieval"
-        if any(kw in query_lower for kw in ["create", "make", "build"]):
-            return "generation"
-        return "general"
+        """分类用户意图(SimpleMem 检索用). 外置于 mechanisms.intent.classify_intent."""
+        from prometheus_nexus.mechanisms.intent import classify_intent
+
+        return classify_intent(query)
 
     def _get_reasoning_chain(self) -> list[str]:
         """Get recent reasoning chain for MCTS retriever."""

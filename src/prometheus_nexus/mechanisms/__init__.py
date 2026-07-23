@@ -12,6 +12,10 @@ from prometheus_nexus.mechanisms.metrics import (
     collect_registry_metrics,
     export_prometheus_format,
 )
+from prometheus_nexus.mechanisms.intent import (
+    classify_intent,
+    extract_tool_calls,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -27,6 +31,8 @@ __all__ = [
     "MetricsSnapshot",
     "collect_registry_metrics",
     "export_prometheus_format",
+    "classify_intent",
+    "extract_tool_calls",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
