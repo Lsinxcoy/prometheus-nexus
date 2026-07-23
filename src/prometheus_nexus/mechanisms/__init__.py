@@ -16,6 +16,9 @@ from prometheus_nexus.mechanisms.intent import (
     classify_intent,
     extract_tool_calls,
 )
+from prometheus_nexus.mechanisms.retrieval import (
+    annotate_trust,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -33,6 +36,7 @@ __all__ = [
     "export_prometheus_format",
     "classify_intent",
     "extract_tool_calls",
+    "annotate_trust",
     "XMemoryAdapter",
     "YBankAdapter",
 ]

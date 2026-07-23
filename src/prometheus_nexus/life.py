@@ -2489,43 +2489,16 @@ class Omega:
             logger.error("_recall_with_trust: recall failed: %s", e)
             return SearchResults(hits=[], total_count=0, query=query, metadata={"trust_state_error": str(e)})
 
-        filtered_hits = []
-        trust_metadata = {"has": 0, "not_has": 0, "uncertain": 0}
-
         try:
-            for hit in results.hits:
-                node = self.store.read_node(hit.node_id)
-                trust_state = "unknown"
-                try:
-                    if node:
-                        trust_state = node.trust_state or "unknown"
-                except Exception:
-                    logger.warning("Failed to read trust_state from node, defaulting to unknown")
-                    trust_state = "unknown"
+            from prometheus_nexus.mechanisms.retrieval import annotate_trust
 
-                hit.metadata["trust_state"] = trust_state
-                trust_metadata[trust_state] = trust_metadata.get(trust_state, 0) + 1
-
-                if trust_state == "not_has":
-                    # Known-absent: include but signal low confidence
-                    hit.metadata["suppressed"] = True
-                    hit.score *= 0.3  # Drastically reduce score
-                    hit.metadata["note"] = "known_absent"
-                elif trust_state == "uncertain":
-                    # Uncertain: flag as unverified
-                    hit.metadata["unverified"] = True
-                    hit.score *= 0.7
-                    hit.metadata["note"] = "unverified"
-                # trust_state == "has": no modification needed
-
-                filtered_hits.append(hit)
-
-            filtered_hits.sort(key=lambda h: h.score, reverse=True)
-            filtered_hits = filtered_hits[:limit]
-
+            filtered_hits, trust_metadata = annotate_trust(
+                results.hits, self.store, limit
+            )
         except Exception as e:
-            logger.error("_recall_with_trust: filtering failed: %s", e)
+            logger.error("_recall_with_trust: annotate failed: %s", e)
             filtered_hits = results.hits[:limit]
+            trust_metadata = {"has": 0, "not_has": 0, "uncertain": 0, "unknown": 0}
 
         result = SearchResults(
             hits=filtered_hits,
