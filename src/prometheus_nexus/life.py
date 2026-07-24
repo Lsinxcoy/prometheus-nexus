@@ -4838,6 +4838,33 @@ class Omega:
             }
         return collect_registry_metrics(reg).to_dict()
 
+    def diagnostics(self) -> dict:
+        """合一诊断出口(遥测生产化) — 宿主/监控周期调用即拿系统+机制全量指标.
+
+        不污染 status() 契约(SystemStatus dataclass 不变),
+        仅组合 status() 系统态 + mechanism_telemetry() 机制态 + 摘要。
+
+        Returns:
+            dict: {system: SystemStatus.dict(), mechanisms: telemetry,
+                   mechanism_summary: {total_calls, total_errors, top_by_calls}}
+        """
+        tel = self.mechanism_telemetry()
+        mechs = tel.get("mechanisms", [])
+        by_calls = sorted(mechs, key=lambda m: m.get("metrics", {}).get("call_count", 0), reverse=True)
+        return {
+            "system": self.status().__dict__,
+            "mechanisms": tel,
+            "mechanism_summary": {
+                "total_calls": tel.get("total_calls", 0),
+                "total_errors": tel.get("total_errors", 0),
+                "by_category": tel.get("by_category", {}),
+                "top_by_calls": [
+                    {"name": m["name"], "call_count": m["metrics"]["call_count"]}
+                    for m in by_calls[:10]
+                ],
+            },
+        }
+
     # 组件健康探针表: (属性名, 方法路径)。status() 与 _compute_health() 共用,
     # 避免重复采集逻辑。任一组件缺失/抛错都被记入 failed, 供健康聚合判定降级。
     COMPONENT_HEALTH_PROBES = [
