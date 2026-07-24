@@ -4900,6 +4900,58 @@ class Omega:
         lines.append("# TYPE omega_system_health_ok gauge")
         lines.append(f"omega_system_health_ok {1 if getattr(st, 'health', '') == 'ok' else 0}")
         return "\n".join(lines) + "\n"
+
+    def start_metrics_server(self, port: int = 8000, host: str = "127.0.0.1"):
+        """启动 /metrics HTTP 端点(轻量 http.server 线程, 供 Prometheus 拉取).
+
+        高风险遥测项(用户允许): 让机制/系统指标真正被 Prometheus 拉取。
+        用标准库 http.server(零 uvicorn 依赖, 避免 import 慢)。daemon 线程,
+        Omega.close() 时优雅停止。仅绑 127.0.0.1(本地采集, 不暴露外网)。
+
+        Args:
+            port: 监听端口(默认 8000)
+            host: 绑定地址(默认 127.0.0.1)
+        """
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        omega_ref = self
+
+        class _MetricsHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path in ("/metrics", "/"):
+                    body = omega_ref.export_prometheus_metrics().encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; version=0.0.4")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *args):
+                pass  # 静默, 避免污染主日志
+
+        server = ThreadingHTTPServer((host, port), _MetricsHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        self._metrics_server = server
+        self._metrics_thread = t
+        logger.info("Omega metrics server started on http://%s:%d/metrics", host, port)
+
+    def stop_metrics_server(self):
+        """停止 /metrics HTTP 端点(Omega.close 时调用)."""
+        server = getattr(self, "_metrics_server", None)
+        if server is not None:
+            try:
+                server.shutdown()
+                server.server_close()
+            except Exception as e:
+                logger.debug("metrics server stop failed: %s", e)
+            self._metrics_server = None
+            self._metrics_thread = None
+
     # 避免重复采集逻辑。任一组件缺失/抛错都被记入 failed, 供健康聚合判定降级。
     COMPONENT_HEALTH_PROBES = [
         ("bank", "bank.count"),
@@ -5289,6 +5341,7 @@ class Omega:
             return "unknown"
 
     def close(self):
+        self.stop_metrics_server()
         self.wal.checkpoint()
         self.bank.close()
         self.cache.close()
