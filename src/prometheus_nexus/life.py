@@ -4865,7 +4865,41 @@ class Omega:
             },
         }
 
-    # 组件健康探针表: (属性名, 方法路径)。status() 与 _compute_health() 共用,
+    def export_prometheus_metrics(self) -> str:
+        """导出 Prometheus text 格式指标(遥测生产化 HTTP 暴露的前置).
+
+        供 Prometheus textfile collector 周期拉取(宿主调此方法写 .prom 文件),
+        或后续挂 /metrics HTTP 端点。零线程、零 uvicorn 依赖。
+
+        含:
+        - 机制级指标(来自 collect_registry_metrics + export_prometheus_format)
+        - 系统级 gauge(node_count / edge_count / uptime / mechanism_count / health)
+
+        Returns:
+            str: Prometheus exposition format
+        """
+        from prometheus_nexus.mechanisms.metrics import (
+            collect_registry_metrics,
+            export_prometheus_format,
+        )
+
+        reg = getattr(self, "mechanism_registry", None)
+        lines = []
+        if reg is not None:
+            lines.append(export_prometheus_format(collect_registry_metrics(reg)))
+
+        st = self.status()
+        lines.append("# TYPE omega_system_node_count gauge")
+        lines.append(f"omega_system_node_count {getattr(st, 'node_count', 0)}")
+        lines.append("# TYPE omega_system_edge_count gauge")
+        lines.append(f"omega_system_edge_count {getattr(st, 'edge_count', 0)}")
+        lines.append("# TYPE omega_system_uptime_seconds gauge")
+        lines.append(f"omega_system_uptime_seconds {getattr(st, 'uptime_seconds', 0):.3f}")
+        lines.append("# TYPE omega_system_mechanism_count gauge")
+        lines.append(f"omega_system_mechanism_count {getattr(st, 'mechanisms', 0)}")
+        lines.append("# TYPE omega_system_health_ok gauge")
+        lines.append(f"omega_system_health_ok {1 if getattr(st, 'health', '') == 'ok' else 0}")
+        return "\n".join(lines) + "\n"
     # 避免重复采集逻辑。任一组件缺失/抛错都被记入 failed, 供健康聚合判定降级。
     COMPONENT_HEALTH_PROBES = [
         ("bank", "bank.count"),
