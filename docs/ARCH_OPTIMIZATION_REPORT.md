@@ -1,6 +1,6 @@
 # Prometheus Nexus 架构优化循环报告
 
-> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 19 轮, 全部已 push 到 origin/master。
+> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 22 轮, 全部已 push 到 origin/master。
 > 原则(用户硬约束): **调度集中是上帝, 不可肢解**; 只外置器官, 不拆 life.py 调度逻辑。
 > 所有改动零破坏既有行为, 由新增测试护栏保证。
 
@@ -27,8 +27,11 @@
 | 17 | P0 批量写接线 | Omega.seed_trusted_knowledge(3) |
 | 18 | 激进#8 外置后见轨迹拼装 | build_hindsight_trajectory → hindsight.py(3) |
 | 19 | 激进#9 外置日志→问题处理器 | IssueLogHandler/should_skip_issue → issue_handler.py(5) |
+| 20 | 更新 19 轮成果报告 | docs/ARCH_OPTIMIZATION_REPORT.md |
+| 21 | 遥测生产化出口 | Omega.diagnostics 合一诊断(3) |
+| 22 | 主循环补单测起步 | remember 写入门护栏(3) |
 
-**累计**: 19 commit, **142 个新增测试全过**(快速集 40s), 远端同步。
+**累计**: 22 commit, **148 个新增测试全过**(快速集 45s), 远端同步。
 
 ## 二、从 life.py 外置的器官(保留上帝调度权)
 
@@ -79,10 +82,10 @@
 - `learn`/`reflect`/`evolve`/`dream`/`maintain` 流程(不可肢解)
 
 **高价值下一步(需人工评估, 不在自动循环安全域)**:
-1. **dopamine gate 决策外置** — `remember` 的门是写入过滤核心, 外置需保语义
-2. **life.py 主循环内部方法补单测** — 为未来"真拆 life.py"铺路(目前仅有本地管道 smoke)
-3. **遥测生产化出口** — `status()` 附 mechanism_telemetry 摘要 / `/metrics` HTTP 暴露
-4. **批量写扩展到 seed 外的可信路径** — 如本地知识库初始化
+1. **dopamine gate 等在线安全门外置** — 写入过滤核心, 外置需保语义(低收益高风险)
+2. **life.py 主循环内部方法系统补单测** — 为"真拆 life.py"铺路(已起步: remember 门护栏)
+3. **遥测 HTTP 暴露** — `/metrics` 端点暴露 diagnostics()(diag 出口已做, 待 HTTP 层)
+4. **批量写扩展可信路径** — seed 外更多可信批量入口(如本地知识库初始化)
 
 ## 六、自主循环机制
 
