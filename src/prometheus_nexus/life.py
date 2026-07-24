@@ -1206,19 +1206,14 @@ class Omega:
         return 0
 
     def _distill_bonus(self) -> float:
-        """SEED 稠密自监督信号: 近期后见技能提炼的蒸馏奖励.
-
-        把"已提炼的可复用 hindsight 技能数"当作行为效应蒸馏回策略的稠密奖励,
-        与结果适应度联合优化 (SEED: 后见监督随策略一起进化).
-        无 LLM / 无技能时返回 0 (降级不崩溃).
-        """
+        """SEED 稠密自监督信号: 近期后见技能提炼的蒸馏奖励. 外置于 mechanisms.distill."""
         try:
             n = len(self._hindsight_miner._seen) if self._hindsight_miner else 0
-            import math
-            ALPHA = 0.02
-            return ALPHA * math.log1p(n)
         except Exception:
             return 0.0
+        from prometheus_nexus.mechanisms.distill import distill_bonus
+
+        return distill_bonus(n)
 
     def _attach_issue_handler(self):
         """挂日志处理器: 捕 ERROR + 关键 WARNING 转成 issue (过滤噪音)."""

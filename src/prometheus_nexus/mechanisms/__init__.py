@@ -34,6 +34,10 @@ from prometheus_nexus.mechanisms.failure_stats import (
     collect_failure_paths,
     get_failed_trajectory,
 )
+from prometheus_nexus.mechanisms.distill import (
+    distill_bonus,
+    DEFAULT_ALPHA,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -61,6 +65,8 @@ __all__ = [
     "compute_success_rate",
     "collect_failure_paths",
     "get_failed_trajectory",
+    "distill_bonus",
+    "DEFAULT_ALPHA",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
