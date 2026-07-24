@@ -244,6 +244,8 @@ class MechanismRegistry:
                 return False
         # 降级: 原 executable.run (草案类/无 draft_code 机制)
         if executable is not None:
+            import time as _time
+            _t0 = _time.perf_counter()
             try:
                 if isinstance(executable, BaseMechanism):
                     result = executable.run(context or {})
@@ -252,11 +254,22 @@ class MechanismRegistry:
                     entry["error_count"] = entry.get("error_count", 0)
                     if not ok:
                         entry["error_count"] += 1
+                    _dt = (_time.perf_counter() - _t0) * 1000.0
+                    if hasattr(executable, "record_latency"):
+                        executable.record_latency(_dt)
                     return ok
                 if callable(executable):
                     executable(context or {})
+                    _dt = (_time.perf_counter() - _t0) * 1000.0
+                    if hasattr(executable, "record_latency"):
+                        executable.record_latency(_dt)
                     return True
             except Exception as e:  # 机制执行失败不影响主流程
+                _dt = (_time.perf_counter() - _t0) * 1000.0
+                if hasattr(executable, "record_latency"):
+                    executable.record_latency(_dt)
+                if hasattr(executable, "record_error"):
+                    executable.record_error(e)
                 logger.warning("MechanismRegistry: invoke %s failed: %s", name, e)
                 entry["error_count"] = entry.get("error_count", 0) + 1
                 return False
