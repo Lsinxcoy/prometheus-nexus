@@ -1179,14 +1179,10 @@ class Omega:
                 events = self.event_bus.get_recent(20)
             except Exception:
                 pass
-            trajectory = {
-                "errors": errors,
-                "events": events,
-                "diagnostics": {"pipeline": pipeline},
-                "produced": produced,
-                "outcome": outcome,
-                "success": success,
-            }
+            from prometheus_nexus.mechanisms.hindsight import build_hindsight_trajectory
+            trajectory = build_hindsight_trajectory(
+                errors, events, pipeline, produced, outcome, success
+            )
             skills = self._hindsight_miner.mine(pipeline, trajectory)
             if skills:
                 return self._hindsight_miner.register(pipeline, skills)

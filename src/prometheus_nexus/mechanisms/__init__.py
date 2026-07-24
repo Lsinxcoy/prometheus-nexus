@@ -42,6 +42,9 @@ from prometheus_nexus.mechanisms.ledger import (
     is_duplicate_production,
     summarize_issues,
 )
+from prometheus_nexus.mechanisms.hindsight import (
+    build_hindsight_trajectory,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -73,6 +76,7 @@ __all__ = [
     "DEFAULT_ALPHA",
     "is_duplicate_production",
     "summarize_issues",
+    "build_hindsight_trajectory",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
