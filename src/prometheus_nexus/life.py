@@ -4880,6 +4880,57 @@ class Omega:
         ("evolution_engine", "evolution_engine.get_stats"),
     ]
 
+    def seed_trusted_knowledge(
+        self,
+        contents: list[str],
+        utility: float = 0.5,
+        tags: list[str] | None = None,
+        branch: str = "main",
+    ) -> dict:
+        """批量灌库可信离线知识(让 P0 存储批量写 13.9x 真实生效).
+
+        ⚠️ 仅限可信离线种子(本地语料/已审核文档). 此路径**跳过 remember 的
+        11 道在线安全门**(输入门/5gate/dopamine/constitution 等), 直接走
+        store.create_nodes_batch 一次锁/一次事务批量写入.
+
+        在线路径(用户输入/外部抓取)必须经 remember 过门, 不可用此入口 —
+        否则安全退化. 这是 13.9x 收益(纯 store 层实测)在安全边界内的正确落点.
+
+        Args:
+            contents: 知识文本列表
+            utility / tags / branch: 写入属性(统一应用)
+
+        Returns:
+            dict: {accepted, created, failed, total}
+        """
+        from prometheus_nexus.foundation.schema import Node, NodeType
+
+        nodes = []
+        for c in contents:
+            if not isinstance(c, str) or not c.strip():
+                continue
+            nodes.append(
+                Node(
+                    id=generate_uuidv7(),
+                    type=NodeType.FACT,
+                    content=c,
+                    tags=tags or [],
+                    utility=utility,
+                    branch=branch,
+                    trust_state="has",
+                )
+            )
+        if not nodes:
+            return {"accepted": 0, "created": 0, "failed": [], "total": len(contents)}
+
+        result = self.store.create_nodes_batch(nodes)
+        return {
+            "accepted": len(nodes),
+            "created": result.created,
+            "failed": result.failed,
+            "total": len(contents),
+        }
+
     def _collect_component_health(self) -> tuple[dict, list[str]]:
         """安全采集各组件健康。
 
