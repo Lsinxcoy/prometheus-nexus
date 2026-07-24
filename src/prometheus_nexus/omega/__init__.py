@@ -4,5 +4,6 @@
 """
 
 from prometheus_nexus.omega.assembly import register_all_mechanisms
+from prometheus_nexus.omega.heartbeat import run_heartbeat
 
-__all__ = ["register_all_mechanisms"]
+__all__ = ["register_all_mechanisms", "run_heartbeat"]

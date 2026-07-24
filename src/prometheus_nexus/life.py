@@ -988,33 +988,11 @@ class Omega:
     # heartbeat — 自发周期循环，减少对 Hermes cron 的依赖
     # ============================================================
     def _heartbeat_loop(self):
-        """Daemon thread: 每 _heartbeat_interval 秒触发 learn，
-        CNS 链自动完成 reflect → evolve → dream → maintain。"""
-        while self._heartbeat_running:
-            try:
-                time.sleep(self._heartbeat_interval)
+        """Daemon thread: 每 _heartbeat_interval 秒触发 learn (CNS 链 reflect→evolve→dream→maintain).
+        心跳逻辑外置于 omega.heartbeat.run_heartbeat."""
+        from prometheus_nexus.omega.heartbeat import run_heartbeat
 
-                if not self._heartbeat_running:
-                    break
-                # 触发 learn，CNS 会链式触发剩余管道
-
-                hb_query = "auto heartbeat"
-                if getattr(self, "focus_topics", None):
-                    top = self.focus_topics.most_common(1)
-                    if top:
-                        hb_query = top[0][0]
-                # 源轮转: 每轮心跳换一个源, 让论文(arxiv)/代码(github)/百科(wiki)节点自动积累
-                hb_src = self._hb_sources[self._hb_src_i % len(self._hb_sources)]
-                self._hb_src_i += 1
-                result = self.learn(source=hb_src, query=hb_query,
-                                    max_results=1)
-                # 只记录成功/失败，不阻塞主循环
-                if result.get("success") or result.get("new_nodes", 0) > 0:
-                    logger.info("Heartbeat: learn OK (%d nodes)", result.get("new_nodes", 0))
-                else:
-                    logger.warning("Heartbeat: learn returned %s", result.get("reason", "unknown"))
-            except Exception as e:
-                logger.warning("Heartbeat cycle failed: %s", e)
+        run_heartbeat(self)
 
     # ============================================================
     # remember pipeline (11 stages)
