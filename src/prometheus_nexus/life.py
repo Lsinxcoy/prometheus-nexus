@@ -4906,28 +4906,10 @@ class Omega:
         }
 
     def _collect_component_health(self) -> tuple[dict, list[str]]:
-        """安全采集各组件健康。
+        """安全采集各组件健康. 外置于 omega.health.collect_component_health."""
+        from prometheus_nexus.omega.health import collect_component_health
 
-        Returns:
-            (details, failed):
-            - details[name] = 组件统计, 或 {'error': ...}(缺失/抛错)
-            - failed = 探测失败的组件名列表(供 _compute_health 聚合)
-        """
-        details: dict = {}
-        failed: list[str] = []
-        for name, method in self.COMPONENT_HEALTH_PROBES:
-            attr = method.split('.')[-1]
-            try:
-                comp = getattr(self, name, None)
-                if comp is None or not hasattr(comp, attr):
-                    details[name] = {"error": f"{name} not initialized or missing method"}
-                    failed.append(name)
-                    continue
-                details[name] = getattr(comp, attr)()
-            except Exception as e:
-                details[name] = {"error": str(e)[:50]}
-                failed.append(name)
-        return details, failed
+        return collect_component_health(self)
 
     def get_mechanism_consumption(self) -> dict:
         """机制消费/健康统一视图 — 委托 Nexus 真相源 (第三层监控统合).
@@ -5204,27 +5186,10 @@ class Omega:
         return min(1.0, max(0.0, total))
 
     def _compute_health(self, failed_components: list[str] | None = None) -> str:
-        try:
-            if self.store.get_node_count() == 0:
-                return "empty"
-            eq = self.equilibrium.get_alert_level()
-            if eq == AlertLevel.RED:
-                return "critical"
-            if eq == AlertLevel.ORANGE:
-                return "degraded"
-            # 聚合组件健康: 原先仅看 equilibrium, 组件失败被完全忽略(监控盲区)。
-            # 现把 status() 已采集的失败组件计入: 1+ 失败 -> degraded;
-            # 达到阈值 -> critical。equilibrium 仍是最优先信号。
-            if failed_components is None:
-                _, failed_components = self._collect_component_health()
-            if len(failed_components) >= self.HEALTH_CRITICAL_COMPONENT_FAILURES:
-                return "critical"
-            if failed_components:
-                return "degraded"
-            return "healthy"
-        except Exception:
-            logger.warning("Health status check failed, returning unknown")
-            return "unknown"
+        """聚合系统健康等级. 外置于 omega.health.compute_health."""
+        from prometheus_nexus.omega.health import compute_health
+
+        return compute_health(self, failed_components)
 
     def close(self):
         self.stop_metrics_server()
