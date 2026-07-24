@@ -1122,18 +1122,10 @@ class Omega:
         try:
             with self._production_lock:
                 # 去重: 避免同一产出被多路径重复记 (如 learn 调 remember 导致知识节点记2次)
-                key = None
-                if ptype == "knowledge":
-                    key = detail.get("node_id") if detail else None
-                if key is None:
-                    key = f"{ptype}:{summary}"
                 # 检查最近是否已记过相同 key (窗口: 最近 200 条内)
-                for p in reversed(self._productions[-200:]):
-                    if p["type"] == ptype and (
-                        (ptype == "knowledge" and p.get("detail", {}).get("node_id") == key)
-                        or (ptype != "knowledge" and p["summary"] == summary)
-                    ):
-                        return  # 重复, 跳过
+                from prometheus_nexus.mechanisms.ledger import is_duplicate_production
+                if is_duplicate_production(self._productions, ptype, summary, detail):
+                    return  # 重复, 跳过
                 _eid = event_id if event_id is not None else getattr(self, "_active_event_id", None)
                 self._productions.append({
                     "id": uuid.uuid4().hex[:12],
@@ -1171,13 +1163,10 @@ class Omega:
             pass
 
     def _get_issues(self, since_minutes: int = 30) -> dict:
-        cutoff = time.time() - since_minutes * 60
-        recent = [i for i in self._issues if i["ts"] >= cutoff]
-        by_level = {}
-        for i in recent:
-            by_level[i["level"]] = by_level.get(i["level"], 0) + 1
-        return {"total": len(recent), "by_level": by_level,
-                "since_minutes": since_minutes, "items": recent}
+        """记录的运行问题统计. 外置于 mechanisms.ledger.summarize_issues."""
+        from prometheus_nexus.mechanisms.ledger import summarize_issues
+
+        return summarize_issues(self._issues, since_minutes)
 
     def _mine_hindsight(self, pipeline: str, produced: int = 0,
                         outcome: str = "", success: bool = True) -> int:

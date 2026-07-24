@@ -38,6 +38,10 @@ from prometheus_nexus.mechanisms.distill import (
     distill_bonus,
     DEFAULT_ALPHA,
 )
+from prometheus_nexus.mechanisms.ledger import (
+    is_duplicate_production,
+    summarize_issues,
+)
 from prometheus_nexus.mechanisms.x_adapter import XMemoryAdapter
 from prometheus_nexus.mechanisms.y_adapter import YBankAdapter
 
@@ -67,6 +71,8 @@ __all__ = [
     "get_failed_trajectory",
     "distill_bonus",
     "DEFAULT_ALPHA",
+    "is_duplicate_production",
+    "summarize_issues",
     "XMemoryAdapter",
     "YBankAdapter",
 ]
