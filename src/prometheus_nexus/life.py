@@ -1201,31 +1201,10 @@ class Omega:
         return distill_bonus(n)
 
     def _attach_issue_handler(self):
-        """挂日志处理器: 捕 ERROR + 关键 WARNING 转成 issue (过滤噪音)."""
-        import logging
+        """Attach a logging handler that records WARNING+ logs as issues. 外置于 mechanisms.issue_handler."""
+        from prometheus_nexus.mechanisms.issue_handler import IssueLogHandler
 
-        NOISE = (
-            "owner_harm", "WAL LCRP rejected",
-            "batch_update_utilities received booleans",
-            "A2A delegate_task failed", "httpx", "urllib3",
-        )
-
-        class _IssueHandler(logging.Handler):
-            def emit(self, record):
-                if record.levelno < logging.WARNING:
-                    return
-                text = record.getMessage()
-                low = text.lower()
-                if any(n.lower() in low for n in NOISE):
-                    return
-                level = "error" if record.levelno >= logging.ERROR else "warning"
-                src = record.name.split(".")[-1] if record.name else "?"
-                try:
-                    self.record_issue(level, src, text)
-                except Exception:
-                    pass
-        h = _IssueHandler()
-        h.setLevel(logging.WARNING)
+        h = IssueLogHandler(self.record_issue)
         logging.getLogger("prometheus_nexus").addHandler(h)
         return h
 
