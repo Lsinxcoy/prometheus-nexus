@@ -1,11 +1,11 @@
 # Prometheus Nexus 架构优化循环报告
 
-> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 35 轮, 全部已 push 到 origin/master。
+> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 39 轮, 全部已 push 到 origin/master。
 > 原则(用户硬约束): **调度集中是上帝, 不可肢解**; 只外置器官/装配/决策, 不拆调度逻辑。
-> 用户授权高风险项(按收益降序): 主循环护栏 → 遥测 HTTP 暴露 → **真拆 life.py 装配层**(九步)。
+> 用户授权高风险项(按收益降序): 主循环护栏 → 遥测 HTTP 暴露 → **真拆 life.py 装配层**(九步) → **架构缺陷修复 #1-#3**。
 > 所有改动零破坏既有行为, 由新增测试护栏保证。
 
-## 一、累计成果(35 轮)
+## 一、累计成果(39 轮)
 
 | # | 优化域 | 关键证据 |
 |---|--------|----------|
@@ -45,7 +45,7 @@
 | 34 | **高风险** 真拆#8 知识利用报告 | `knowledge_utilization_report` → omega/monitor.py |
 | 35 | **高风险** 真拆#9 dopamine gate | `should_reject_dopamine` → omega/gates.py |
 
-**累计**: 35 commit, **187 个新增测试全过**(快速集 ~3min), 远端同步。
+**累计**: 39 commit, **190 个新增测试全过**(快速集 ~3min), 远端同步。
 
 ## 二、从 life.py 外置的器官(保留上帝调度权)
 
@@ -123,6 +123,20 @@
 - `life.py` 拆为多 mixin/文件(需重新设计导入拓扑, 当前委托壳模式已达安全边界)
 - `get_pipeline_health` 外置(archive 文件路径依赖 `__file__`, 需先统一 paths 模块)
 
+## 五之二、架构缺陷修复(#1-#3, 用户授权执行)
+
+评审发现的真问题(非洁癖), 按 ROI 降序低风险修复, 每步测试守护:
+
+| # | 缺陷 | 修复 | 验证 |
+|---|------|------|------|
+| 1 | `status().mechanisms=127` 硬编码魔法数, 与注释"236 机制"矛盾 | 新增 `_mechanism_count()` 读 Nexus 真相源(`get_monitor_snapshot()['mechanisms']`), 降级链 nexus>registry>0 | test_status_mechanism_count(3) + 更新 test_status_consistency |
+| 2 | `status()` 每次调用全量重算(`_collect_component_health` 遍历所有组件 + `_compute_health` 查 store), /metrics 每 15s 拉取成瓶颈 | 加 5s TTL 缓存(uptime 实时刷新, 其余缓存; 懒初始化不碰 `__init__`) | test_status_ttl_cache(3) |
+| 3 | `recall`(融合检索)与 `store.search`(原始 FTS) 语义割裂, seed 直写节点隐式不被 recall 返回 | recall docstring 文档化契约 + 新增 `search_raw()` 统一原始检索入口 + 契约测试 | test_recall_search_contract(3) |
+
+> ⚠️ #3 过程中抓到真回归: patch 误删 `recall` 内 `start=time.time()`, 致 recall 抛 NameError(生产静默崩溃), 已加回并被测试捕获。这正是"每步全量测试"的价值。
+>
+> #3 的"统一"采用**文档化契约 + 提供显式入口**而非强行让 recall/store 一致 —— 因 recall 融合语义是设计核心, 强行统一会破坏信任/分支过滤。消除隐性坑, 不动行为。
+
 ## 六、自主循环机制
 
 - cron 任务 `loop-optimize-nexus`(`44dd4e5fcbb9`, 每 30min, no_agent 脚本模式)
@@ -131,4 +145,4 @@
 
 ---
 
-*生成于自动优化循环第 35 轮。所有 commit 已 push 至 origin/master。自动化安全域(外置纯函数/装配/决策)已清空, 后续仅剩需人工评估的 God class 重构。*
+*生成于自动优化循环第 39 轮。所有 commit 已 push 至 origin/master。自动化安全域(外置纯函数/装配/决策)已清空, 后续仅剩需人工评估的 God class 重构。*
