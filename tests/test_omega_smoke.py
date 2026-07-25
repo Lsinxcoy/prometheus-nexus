@@ -69,7 +69,8 @@ def test_status_consistency(omega: Omega):
     before = omega.store.get_node_count()
     st = omega.status()
     assert st.node_count == before
-    assert st.mechanisms == 127
+    # 机制数读 Nexus 真相源(非硬编码 127); 与 monitor 快照一致
+    assert st.mechanisms == omega.nexus.get_monitor_snapshot()["mechanisms"]
 
 
 def test_mechanism_telemetry_shape(omega: Omega):

@@ -4655,7 +4655,7 @@ class Omega:
     # Status & Fitness
     # ============================================================
     def status(self) -> SystemStatus:
-        """获取系统状态（带 None 安全检查）。"""
+        """获取系统状态(带 None 安全检查)。"""
         details, failed = self._collect_component_health()
         return SystemStatus(
             node_count=self.store.get_node_count(),
@@ -4664,9 +4664,29 @@ class Omega:
             uptime_seconds=time.time() - self._start_time,
             health=self._compute_health(failed_components=failed),
             version="1.0.0",
-            mechanisms=127,
+            mechanisms=self._mechanism_count(),
             details=details,
         )
+
+    def _mechanism_count(self) -> int:
+        """机制总数 — 单一真相源(Nexus 统辖全机制层), 消除硬编码魔法数.
+
+        优先级: nexus.get_monitor_snapshot()['mechanisms'] > mechanism_registry.total
+        > 0。nexus 未初始化(极端降级)时回退 registry, 再无则 0。
+        """
+        nx = getattr(self, "nexus", None)
+        if nx is not None:
+            try:
+                return int(nx.get_monitor_snapshot().get("mechanisms", 0))
+            except Exception:
+                pass
+        reg = getattr(self, "mechanism_registry", None)
+        if reg is not None:
+            try:
+                return int(getattr(reg, "total_mechanisms", 0) or 0)
+            except Exception:
+                pass
+        return 0
 
     def mechanism_telemetry(self) -> dict:
         """机制级遥测快照 (架构优化 P2 接入点).
