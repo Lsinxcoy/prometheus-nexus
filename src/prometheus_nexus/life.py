@@ -1099,6 +1099,7 @@ class Omega:
                  node_type: NodeType = NodeType.FACT, url: str = "",
                  bypass_dopamine: bool = False,
                  raw_chunk: str = "") -> str:
+        from prometheus_nexus.omega.gates import should_reject_dopamine
         # 管道运行计数(监控可见性)
         try:
             self.nexus._pipelines.setdefault("remember", {"runs": 0, "failures": 0, "last_run": None})
@@ -1187,12 +1188,11 @@ class Omega:
             logger.debug("Trigger detector failed: %s", e)
 
         # ===== 原有逻辑 =====
-        if not bypass_dopamine:
-            gate = self.dopamine.evaluate(utility=utility, surprise=surprise)
-            if gate.decision == "reject":
-                self.wal.rollback_tx(tx_id)
-                self.failure_log.log("remember", "dopamine_rejected", {"score": gate.score})
-                return ""
+        # Gate 0: Dopamine gate 决策外置于 omega.gates(副作用 rollback/log 仍留上帝)
+        if should_reject_dopamine(self, utility, surprise, bypass_dopamine):
+            self.wal.rollback_tx(tx_id)
+            self.failure_log.log("remember", "dopamine_rejected", {"score": None})
+            return ""
 
         # Create node
         # 单一获取入口: raw_chunk 存全文/README(供 T3/T4 编译), 缺省回退 content(原 Verbatim 行为)

@@ -13,7 +13,9 @@ from prometheus_nexus.omega.monitor import (
     knowledge_utilization_report,
 )
 from prometheus_nexus.omega.maturity import compute_fitness
+from prometheus_nexus.omega.gates import should_reject_dopamine
 
 __all__ = ["register_all_mechanisms", "run_heartbeat", "collect_component_health",
           "compute_health", "get_mechanism_consumption", "get_semantic_health",
-          "get_dependency_depth", "knowledge_utilization_report", "compute_fitness"]
+          "get_dependency_depth", "knowledge_utilization_report", "compute_fitness",
+          "should_reject_dopamine"]
