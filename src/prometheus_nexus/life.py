@@ -1498,6 +1498,17 @@ class Omega:
     # ============================================================
     def recall(self, query: str, limit: int = 10, branch: str = "main",
                prefer_chunk: bool = False, node_type=None, future_aware: bool = True) -> SearchResults:
+        """多源融合检索(信任/分支/语义融合层过滤后的对外检索入口).
+
+        ⚠️ 读取契约(消除隐性坑): recall 是**融合检索**, 不是原始全文检索.
+        - 经 SimpleMem + slime_mold + four_network 融合索引 + trust_state/branch 过滤
+        - 直写节点(seed_trusted_knowledge / create_nodes_batch)进入 store(FTS 可检索),
+          但**可能不被 recall 融合索引覆盖** → store.search() 能找到, recall() 不返回
+        - 需要"看到所有节点(含 seed 直写)"请用 Omega.search_raw() (原始 store.search 包装)
+
+        这是设计取舍: seed 直写为性能/安全绕过 recall 融合索引构建,
+        若需 seed 可被 recall 检索, 应让 seed 节点进入融合索引(高风险, 另行评估).
+        """
         start = time.time()
         # 管道运行计数(监控可见性)
         try:
@@ -2307,7 +2318,26 @@ class Omega:
 
         return recall_result
 
-    # ============================================================
+    def search_raw(self, query: str, limit: int = 10, branch: str = "main"):
+        """原始全文检索(统一入口) — 看到所有节点(含 seed 直写).
+
+        与 recall() 的契约差异(消除隐性坑):
+        - recall: 融合检索(SimpleMem+slime_mold+four_network+trust_state/branch 过滤),
+          seed 直写节点可能不返回
+        - search_raw: 直接 store.search() 原始 FTS, 所有已落库节点(含 seed)均可检索
+
+        需要"完整知识基底(含 seed)"时用本方法; 需要融合/信任过滤语义用 recall().
+        """
+        try:
+            nodes = self.store.search(query, limit=limit, branch=branch)
+            return [
+                {"node_id": n.id, "content": n.content, "utility": getattr(n, "utility", 0.0),
+                 "branch": getattr(n, "branch", branch), "type": getattr(n, "type", None)}
+                for n in nodes
+            ]
+        except Exception as e:
+            logger.warning("search_raw failed: %s", e)
+            return []
     # B2-2: PolarMem Tristate Query (arXiv 2602.00415)
     # ============================================================
     def _recall_with_trust(self, query: str, limit: int = 10, branch: str = "main",
