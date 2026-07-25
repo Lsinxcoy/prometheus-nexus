@@ -1,10 +1,11 @@
 # Prometheus Nexus 架构优化循环报告
 
-> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 22 轮, 全部已 push 到 origin/master。
-> 原则(用户硬约束): **调度集中是上帝, 不可肢解**; 只外置器官, 不拆 life.py 调度逻辑。
+> 自动优化循环: 发掘改进方案 → 执行改进 → push。共 35 轮, 全部已 push 到 origin/master。
+> 原则(用户硬约束): **调度集中是上帝, 不可肢解**; 只外置器官/装配/决策, 不拆调度逻辑。
+> 用户授权高风险项(按收益降序): 主循环护栏 → 遥测 HTTP 暴露 → **真拆 life.py 装配层**(九步)。
 > 所有改动零破坏既有行为, 由新增测试护栏保证。
 
-## 一、累计成果(19 轮)
+## 一、累计成果(35 轮)
 
 | # | 优化域 | 关键证据 |
 |---|--------|----------|
@@ -30,8 +31,21 @@
 | 20 | 更新 19 轮成果报告 | docs/ARCH_OPTIMIZATION_REPORT.md |
 | 21 | 遥测生产化出口 | Omega.diagnostics 合一诊断(3) |
 | 22 | 主循环补单测起步 | remember 写入门护栏(3) |
+| 23 | 更新报告至 22 轮 | docs/ARCH_OPTIMIZATION_REPORT.md |
+| 24 | **高风险** 主循环 pipeline smoke 安全网 | learn/reflect/evolve/dream/maintain 全跑通(6) |
+| 25 | **高风险** 遥测 Prometheus 导出 | `export_prometheus_metrics()`(3) |
+| 26 | **高风险** 遥测 /metrics HTTP 端点 | `start_metrics_server()` 真实拉取(2) |
+| 27 | **高风险** 真拆#1 装配层 | `_nexus_register_all` → omega/assembly.py |
+| 28 | **高风险** 真拆#2 心跳线程 | `_heartbeat_loop` → omega/heartbeat.py |
+| 29 | **高风险** 真拆#3 健康采集/聚合 | `_collect_component_health`+`_compute_health` → omega/health.py |
+| 30 | **高风险** 真拆#4 监控统计 | `get_mechanism_consumption` → omega/monitor.py |
+| 31 | **高风险** 真拆#5 语义健康 | `get_semantic_health` → omega/monitor.py |
+| 32 | **高风险** 真拆#6 依赖深度 | `get_dependency_depth` → omega/monitor.py |
+| 33 | **高风险** 真拆#7 成熟度评分 | `_compute_fitness` → omega/maturity.py(减~88行) |
+| 34 | **高风险** 真拆#8 知识利用报告 | `knowledge_utilization_report` → omega/monitor.py |
+| 35 | **高风险** 真拆#9 dopamine gate | `should_reject_dopamine` → omega/gates.py |
 
-**累计**: 22 commit, **148 个新增测试全过**(快速集 45s), 远端同步。
+**累计**: 35 commit, **187 个新增测试全过**(快速集 ~3min), 远端同步。
 
 ## 二、从 life.py 外置的器官(保留上帝调度权)
 
@@ -50,8 +64,26 @@
 | `hindsight.py` | `build_hindsight_trajectory` | `_mine_hindsight`(轨迹拼装段) |
 | `issue_handler.py` | `IssueLogHandler`, `should_skip_issue` | `_attach_issue_handler` |
 
-**共 13 个器官外置**。价值: 每个独立可单测(无需实例化 5300 行 Omega);
-主文件净减约 200 行; 每个外置点都有委托一致性验收测试。
+**共 13 个器官外置**(mechanisms/)。价值: 每个独立可单测; 主文件净减约 200 行。
+
+### 2.1 真拆 life.py 装配层(omega/ 包, 用户授权高风险项)
+
+调度逻辑(remember/recall/learn/reflect/evolve/dream/maintain/branch_*/record_*)**一行没拆**——
+这些是直接调各子系统(被装配进 Omega 的属性)的"上帝编排", 拆了就丢了统一调度点。
+仅把**与调度解耦的装配/统计/决策**抽到 `omega/` 包, life.py 改委托壳:
+
+| 模块 | 外置内容 | 原 life.py | life.py 减行 |
+|------|----------|-----------|-------------|
+| `omega/assembly.py` | `register_all_mechanisms` | `_nexus_register_all`(机制注册+Nexus代理) | ~98 |
+| `omega/heartbeat.py` | `run_heartbeat` | `_heartbeat_loop`(daemon线程) | ~28 |
+| `omega/health.py` | `collect_component_health`, `compute_health` | `_collect_component_health`, `_compute_health` | ~55 |
+| `omega/monitor.py` | `get_mechanism_consumption`, `get_semantic_health`, `get_dependency_depth`, `knowledge_utilization_report` | 对应4方法 | ~120 |
+| `omega/maturity.py` | `compute_fitness` | `_compute_fitness`(10维度评分) | ~88 |
+| `omega/gates.py` | `should_reject_dopamine` | remember 的 dopamine gate 决策 | ~11 |
+
+**omega/ 包共 9 步真拆**, life.py 累计减约 **400+ 行**。所有外置均为委托壳,
+行为逐行不变, 每步有委托一致性 + 结构验收测试。注入/写入副作用(rollback/failure_log)
+仍留 life.py(上帝职责), omega/gates.py 只回答"是否拒绝"。
 
 ## 三、P0 存储批量写: 13.9x 的真实边界(诚实声明)
 
@@ -76,22 +108,27 @@
 
 ## 五、剩余风险与下一步建议
 
-**未外置的 life.py 方法**(均涉及多 self 状态/锁或主路径, 纯函数化收益低、风险高):
-- `record_production`/`record_issue` 写入体(改列表+锁, 状态变更属上帝职责)
-- `remember`/`recall` 主路径(上帝调度核心)
+**未外置的 life.py 方法**(上帝调度核心, 用户硬约束不可拆):
+- `remember`/`recall` 主路径(统一写入/检索编排)
 - `learn`/`reflect`/`evolve`/`dream`/`maintain` 流程(不可肢解)
+- `branch_*`/`record_production`/`record_issue`(状态变更属上帝职责)
 
-**高价值下一步(需人工评估, 不在自动循环安全域)**:
-1. **dopamine gate 等在线安全门外置** — 写入过滤核心, 外置需保语义(低收益高风险)
-2. **life.py 主循环内部方法系统补单测** — 为"真拆 life.py"铺路(已起步: remember 门护栏)
-3. **遥测 HTTP 暴露** — `/metrics` 端点暴露 diagnostics()(diag 出口已做, 待 HTTP 层)
-4. **批量写扩展可信路径** — seed 外更多可信批量入口(如本地知识库初始化)
+**高风险项已按收益降序全部做完**:
+1. ✅ 主循环 pipeline smoke 安全网(#24)
+2. ✅ 遥测 Prometheus 导出(#25)+ /metrics HTTP 端点(#26)
+3. ✅ 真拆 life.py 装配层九步(#27-35, omega/ 7 模块)
+4. ✅ dopamine gate 决策外置(#35)
+
+**仍待人工评估(超出"外置装配"域, 需拆 God class 本身, 风险陡增)**:
+- `life.py` 拆为多 mixin/文件(需重新设计导入拓扑, 当前委托壳模式已达安全边界)
+- `get_pipeline_health` 外置(archive 文件路径依赖 `__file__`, 需先统一 paths 模块)
 
 ## 六、自主循环机制
 
 - cron 任务 `loop-optimize-nexus`(`44dd4e5fcbb9`, 每 30min, no_agent 脚本模式)
-- 脚本 `~/.hermes/scripts/loop_optimize.py`: 自检 src/tests 改动 → 跑 142 快速测试基线(venv python 优先绕开 uv 联网) → 侦测下一可外置目标 → 报告状态
+- 脚本 `~/.hermes/scripts/loop_optimize.py`: 自检 src/tests 改动 → 跑 187 快速测试基线(venv python 优先绕开 uv 联网) → 侦测下一可外置目标 → 报告状态
 - 无消息时保活(监控基线、报告进度); 用户唤醒会话时立即续跑把侦测目标亲手做完
 
 ---
-*生成于自动优化循环第 19 轮。所有 commit 已 push 至 origin/master。*
+
+*生成于自动优化循环第 35 轮。所有 commit 已 push 至 origin/master。自动化安全域(外置纯函数/装配/决策)已清空, 后续仅剩需人工评估的 God class 重构。*
