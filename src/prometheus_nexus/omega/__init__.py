@@ -6,7 +6,7 @@
 from prometheus_nexus.omega.assembly import register_all_mechanisms
 from prometheus_nexus.omega.heartbeat import run_heartbeat
 from prometheus_nexus.omega.health import collect_component_health, compute_health
-from prometheus_nexus.omega.monitor import get_mechanism_consumption
+from prometheus_nexus.omega.monitor import get_mechanism_consumption, get_semantic_health
 
 __all__ = ["register_all_mechanisms", "run_heartbeat", "collect_component_health",
-          "compute_health", "get_mechanism_consumption"]
+          "compute_health", "get_mechanism_consumption", "get_semantic_health"]

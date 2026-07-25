@@ -64,3 +64,44 @@ def get_mechanism_consumption(self) -> dict:
     except Exception as e:
         logger.debug("get_mechanism_consumption failed: %s", e)
         return {"total": 0, "consumed": 0, "rate": 0.0, "by_carrier": {}}
+
+
+def get_semantic_health(self) -> dict:
+    """Tier 3: 学习语义相关性 — 近期节点 utility 分布, 检测'是否在学垃圾'.
+
+    返回 low_utility_ratio (utility<0.1 占比) 与 kta_untranslated (未消化高utility知识).
+    (原 Omega.get_semantic_health 的纯搬迁版本, 行为逐行不变)
+    """
+    try:
+        from prometheus_nexus.foundation.schema import NodeType
+
+        store = getattr(self, "store", None)
+        if store is None:
+            return {"low_utility_ratio": 0.0, "sampled": 0, "kta_untranslated": 0}
+        # 采样近期 FACT/INSIGHT/CONCEPT/PATTERN 节点 (近期学习主体)
+        utils: list[float] = []
+        for nt in (NodeType.FACT, NodeType.INSIGHT, NodeType.CONCEPT, NodeType.PATTERN):
+            try:
+                nodes = store.get_nodes_by_type(nt, limit=200)
+                for n in nodes:
+                    u = getattr(n, "utility", None)
+                    if u is not None:
+                        utils.append(u)
+            except Exception:
+                continue
+        sampled = len(utils)
+        low = sum(1 for u in utils if u < 0.1)
+        low_ratio = round(low / max(1, sampled), 4)
+        # KTA 未翻译高utility节点 (知识未消化)
+        kta = 0
+        try:
+            kta_hint = self.knowledge_to_mechanism.scan_for_opportunities(
+                store=store, utility_threshold=0.6)
+            kta = kta_hint.get("untranslated_count", 0) or 0
+        except Exception:
+            pass
+        return {"low_utility_ratio": low_ratio, "sampled": sampled,
+                "low_utility_count": low, "kta_untranslated": kta}
+    except Exception as e:
+        logger.debug("get_semantic_health failed: %s", e)
+        return {"low_utility_ratio": 0.0, "sampled": 0, "kta_untranslated": 0}
