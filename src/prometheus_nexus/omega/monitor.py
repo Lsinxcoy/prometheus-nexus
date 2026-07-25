@@ -127,3 +127,42 @@ def get_dependency_depth(self) -> dict:
     except Exception as e:
         logger.debug("get_dependency_depth failed: %s", e)
         return {"transitive_islands": [], "depth": 0}
+
+
+def knowledge_utilization_report(self) -> dict:
+    """汇总外部知识在 7 管道中的利用情况, 提供统一效率指标.
+
+    覆盖: 吸收(learn) / 检索命中(recall) / 进化消费(evolve) /
+    梦境回流(dream) / 遗忘保护(maintain) / 长期主题(focus_topics).
+    (原 Omega.knowledge_utilization_report 的纯搬迁版本, 行为逐行不变)
+    """
+    try:
+        total_nodes = self.store.get_node_count()
+        # 检索命中
+        lf = getattr(self, "learn_feedback", None)
+        registered = len(getattr(lf, "_registered", {}))
+        total_hits = sum(getattr(lf, "_hits", {}).values())
+        hit_rate = (total_hits / registered) if registered else 0.0
+        # 进化消费: 派生基因维度是否产生
+        evo_specs = getattr(getattr(self, "evolution_engine", None), "_gene_specs", {}) or {}
+        ext_specs = {k: v for k, v in evo_specs.items() if k.startswith("ext_")}
+        # 梦境回流
+        dream_nodes = [n for n in self.store.get_active_nodes(limit=300)
+                       if "dream_synthesis" in (getattr(n, "tags", []) or [])]
+        # 遗忘保护
+        protected = sum(1 for h in getattr(lf, "_hits", {}).values() if h >= 3)
+        # 长期主题
+        focus = dict(getattr(self, "focus_topics", {}))
+        return {
+            "total_nodes": total_nodes,
+            "learned_registered": registered,
+            "recall_total_hits": total_hits,
+            "recall_hit_rate": round(hit_rate, 4),
+            "evolve_external_dims": len(ext_specs),
+            "dream_synthesis_nodes": len(dream_nodes),
+            "maintain_protected_high_hit": protected,
+            "focus_topics": focus,
+        }
+    except Exception as e:
+        logger.warning("knowledge_utilization_report failed: %s", e)
+        return {"error": str(e)}
