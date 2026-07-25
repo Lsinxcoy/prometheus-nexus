@@ -11,7 +11,8 @@ from prometheus_nexus.omega.monitor import (
     get_semantic_health,
     get_dependency_depth,
 )
+from prometheus_nexus.omega.maturity import compute_fitness
 
 __all__ = ["register_all_mechanisms", "run_heartbeat", "collect_component_health",
           "compute_health", "get_mechanism_consumption", "get_semantic_health",
-          "get_dependency_depth"]
+          "get_dependency_depth", "compute_fitness"]
