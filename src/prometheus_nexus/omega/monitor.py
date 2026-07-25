@@ -105,3 +105,25 @@ def get_semantic_health(self) -> dict:
     except Exception as e:
         logger.debug("get_semantic_health failed: %s", e)
         return {"low_utility_ratio": 0.0, "sampled": 0, "kta_untranslated": 0}
+
+
+def get_dependency_depth(self) -> dict:
+    """Tier 3: 依赖深度 — 传递性孤岛 (消费者的消费者也是孤岛).
+
+    构建机制消费图: 已知 silent_mechanisms 是表面孤岛.
+    若某机制的触发路径依赖另一孤岛机制(消费关系), 则其实质也是孤岛.
+    这里用已知 silent 集合 + 机制 emit_accepted 关系做一层传递闭包近似.
+    (原 Omega.get_dependency_depth 的纯搬迁版本, 行为逐行不变)
+    """
+    try:
+        cons = self.get_mechanism_consumption()
+        silent = set(cons.get("silent_mechanisms", []))
+        if not silent:
+            return {"transitive_islands": [], "depth": 0}
+        # 近似: 表面孤岛中, 属 'trigger_missing' (真bug线索) 且名为 learn_* / semantic_evo_*
+        # 这类通常是上游数据源, 其下游机制若依赖它们则实质连带失活.
+        transitive = [s for s in silent if any(k in s for k in ("learn_", "semantic_evo_", "academic", "arxiv"))]
+        return {"transitive_islands": transitive, "depth": 1, "surface_islands": len(silent)}
+    except Exception as e:
+        logger.debug("get_dependency_depth failed: %s", e)
+        return {"transitive_islands": [], "depth": 0}
