@@ -4655,18 +4655,34 @@ class Omega:
     # Status & Fitness
     # ============================================================
     def status(self) -> SystemStatus:
-        """获取系统状态(带 None 安全检查)。"""
+        """获取系统状态(带 None 安全检查)。
+
+        5s TTL 缓存: 监控(/metrics 每 15s 拉取)无需每次全量重算
+        _collect_component_health(遍历所有组件) + _compute_health(查 store/equilibrium)。
+        uptime 实时性在 5s 容差内, 监控语义可接受。
+        """
+        import time as _time
+        _now = _time.time()
+        _ts = getattr(self, "_status_cache_ts", 0)
+        _cached = getattr(self, "_status_cache", None)
+        if _cached is not None and (_now - _ts) < 5.0:
+            # 仅 uptime 实时刷新(其余缓存)
+            _cached.uptime_seconds = _now - self._start_time
+            return _cached
         details, failed = self._collect_component_health()
-        return SystemStatus(
+        st = SystemStatus(
             node_count=self.store.get_node_count(),
             edge_count=self.store.get_edge_count(),
             active_sessions=1,
-            uptime_seconds=time.time() - self._start_time,
+            uptime_seconds=_now - self._start_time,
             health=self._compute_health(failed_components=failed),
             version="1.0.0",
             mechanisms=self._mechanism_count(),
             details=details,
         )
+        self._status_cache = st
+        self._status_cache_ts = _now
+        return st
 
     def _mechanism_count(self) -> int:
         """机制总数 — 单一真相源(Nexus 统辖全机制层), 消除硬编码魔法数.
